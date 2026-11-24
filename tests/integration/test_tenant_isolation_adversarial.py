@@ -21,6 +21,7 @@ from __future__ import annotations
 import base64
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -136,7 +137,11 @@ async def test_api_key_org_mismatch_denied(inmemory: None, publish_off: None) ->
     # Mint a real BETA-scoped admin key straight into the store.
     full, prefix, key_hash = mint_key()
     rec = ApiKeyRecord(
-        key_id="k1",
+        # Unique per run. `api_keys` lives in the SHARED `rag_identity` schema and this test does
+        # not tear the row down, so a hardcoded id passes once against a fresh Postgres and then
+        # fails every later run with a duplicate-key violation on `api_keys_pkey`. The in-memory
+        # profile never saw it because its store starts empty each time.
+        key_id=f"k1-{uuid4().hex[:12]}",
         org_id=BETA,
         name="beta-key",
         prefix=prefix,

@@ -90,7 +90,15 @@ async def test_beta_cannot_read_alpha_via_multivector_search_methods(inmemory: N
     from rag_schemas.chunk import Span
 
     vs = factory.get_vector_store()
-    emb = factory.get_embedder()  # in-memory LocalHashEmbedder carries embed_multi
+    emb = factory.get_embedder()
+    # `embed_multi` is the MultiVectorEmbedder capability, and only a multivector-capable
+    # embedder has it: the in-memory LocalHashEmbedder and BgeM3Embedder (`bge_m3_multi`).
+    # Under a single-vector real-store profile the factory hands back a TeiEmbedder, which
+    # correctly has no such method — so there is no multivector path to isolate and the
+    # assertion below has nothing to say. Skip rather than fail: this used to raise
+    # AttributeError in the real-store pass and read like an isolation defect, which it is not.
+    if not hasattr(emb, "embed_multi"):
+        pytest.skip(f"{type(emb).__name__} is single-vector; the 2b multivector legs do not apply")
     chunk = __import__("rag_schemas", fromlist=["Chunk"]).Chunk(
         chunk_id="a1", doc_id="d1", tenant_id=ALPHA, text="alpha ledger balance secret", span=Span(start=0, end=5)
     )
