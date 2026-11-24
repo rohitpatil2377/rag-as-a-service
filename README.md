@@ -29,7 +29,7 @@ To run against the real stack instead of in-memory adapters:
 ```bash
 make up         # docker compose: Qdrant, OpenSearch, S3, Postgres, TEI, API, console, observability
 make migrate    # Alembic baseline schema against the live Postgres
-make demo --stores   # or: uv run python -m demo_cli.run --stores --ask "..."
+make demo ARGS=--stores   # or: uv run python -m demo_cli.run --stores --ask "..."
 ```
 
 `make up` is **self-contained**: no secrets, no model endpoint, no GPU, nothing to sign up for.
@@ -80,7 +80,7 @@ THREE COMMANDS, and a green `make ci` is the first of them, not all of them:
 make ci                              # ruff over the WHOLE repo, mypy strict over
                                      # libs services apps sdks/python, 2,947 unit tests
 uv run pytest -q -m "e2e"            # 394 tests, in-memory profile, no infrastructure
-make up && uv run pytest -q -m "integration"   # 107 tests, needs the live stores
+make up && uv run pytest -q -m "integration"   # 114 tests, needs the live stores
 ```
 
 `make test` is `pytest -m "not integration and not e2e and not eval"`, so **`make ci` excludes
@@ -91,7 +91,7 @@ run as a full repository pass.
 **Do not substitute a path-scoped lint or typecheck for `make ci`.** The scopes differ by whole
 directories and the difference is invisible until something ships: `mypy libs services apps`
 omits `sdks/python`, and `ruff check libs services apps` omits the repo-root `tests/` directory
-entirely. Both of those shipped a defect on this branch before the gate was run properly.
+entirely. Both scopes have let a defect through before, which is why the gate is defined once.
 
 `make hooks` installs `.githooks/pre-push`, which runs `make ci` automatically. It is a local
 safeguard, not enforcement: it needs installing in each clone and `--no-verify` bypasses it.
@@ -122,17 +122,27 @@ make up
 export RAG_TEST_REAL_STORES=true RAG_ENV=dev RAG_OTEL_ENABLED=false RAG_LOG_JSON=false
 export RAG_QDRANT_URL=http://localhost:6333 RAG_OPENSEARCH_URL=http://localhost:9200
 export RAG_MINIO_ENDPOINT=localhost:9000 RAG_TEI_URL=http://localhost:8080
+export RAG_RERANK_URL=http://localhost:8083
 export RAG_POSTGRES_DSN="postgresql+psycopg://rag:rag@localhost:5432/rag"
+# REQUIRED, and the easiest thing to get wrong. These are container env in the compose
+# file, but a host-side pytest run builds its own Settings, whose defaults are bge-m3/1024
+# while the dev `tei` service serves bge-small at 384. Omit them and every collection is
+# created at 1024, then the first upsert dies with "expected dim: 1024, got 384".
+export RAG_EMBED_BACKEND=tei RAG_EMBED_MODEL=BAAI/bge-small-en-v1.5 RAG_EMBED_DIM=384
 export RAG_LLM_BACKEND=extractive_dev RAG_ALLOWED_EGRESS_HOSTS=localhost
 uv run alembic -c libs/clients/alembic.ini upgrade head
-uv run pytest -q
+uv run pytest -q -m integration
 ```
-Both profiles were validated green (**32/32** as of 2026-07-02, incl. the FR-E4
-three-way faithfulness routing and `tests/integration/test_tenant_isolation.py`)
-against live Qdrant + OpenSearch + MinIO + Postgres. Real-adapter bugs found and fixed
-during the first pass (an unprovisioned tenant's search must return "no results," not
-an error; exception normalisation on `ObjectStore.get`; a missing `ensure_schema` call;
-connection-pool leaks with no `aclose` on shutdown) are documented in
+(If you remapped a published port because of a clash — see
+`infra/compose/docker-compose.local.example.yml` — use the remapped port in the DSN/URLs.)
+Both profiles are green. The integration suite was last run against live Qdrant +
+OpenSearch + SeaweedFS + Postgres at **113 passed, 1 skipped** — twice consecutively, which
+is the check that matters, because two of its tests used to pass only on a virgin database.
+The skip is the multivector isolation probe, which has nothing to assert under a
+single-vector embedder. Real-adapter bugs found and fixed during the first pass (an
+unprovisioned tenant's search must return "no results," not an error; exception
+normalisation on `ObjectStore.get`; a missing `ensure_schema` call; connection-pool leaks
+with no `aclose` on shutdown) are documented in
 [`docs/adr/0004-inmemory-adapters-for-fast-ci.md`](docs/adr/0004-inmemory-adapters-for-fast-ci.md).
 
 ## Cross-department sharing: the shared KB (Federated RAG Tier C)
@@ -166,23 +176,30 @@ Rules worth knowing before using it:
   KB in play (own + shared, or an explicit multi-KB `kb_ids`) is queried at once, so the
   shared KB riding along on every default ask doesn't multiply query latency by KB count.
 
-## Dev VM memory sizing (no swap)
+## Memory sizing
 
-The `infra/compose` dev stack is sized for a **23 GB-RAM, CPU-only, no-swap** box. With
-no swap, an OOM spike **kills a container outright**, so every heavy container has an
-explicit `mem_limit` (sum ≈ 13.5 GB) and OpenSearch's JVM heap is capped
-(`-Xmx1g`). **The full stack + a 3B model needs ~16–18 GB usable RAM; because this box
-has no swap, limits are enforced per-container** so no single service can starve the
-others. Measured peak (full stack + Qwen2.5-3B on CPU, `make up` + `make demo`,
-2026-07-02): host **used ≈ 5.3 GB, `available` never below ≈ 18.6 GB** (well above the
-4 GB floor); llama peak ≈ 1.6 GB, OpenSearch ≈ 1.05 GB. `docker stats` reports low
-`free` only because Linux holds reclaimable disk cache — `available` is the OOM-relevant
-figure with no swap. Dev profile only; prod sizing lives in `infra/helm`.
+The default `make up` is laptop-sized: **13 containers, ~2.5–3 GB resident** (measured with
+`docker stats` on a 16 GB machine). Nothing large is downloaded, because generation runs on
+`extractive_dev` and both model servers are opt-in. Opting in costs roughly:
 
-**LLM tier (this VM has no GPU):** real generation runs on `llama.cpp` (CPU) serving
-**Qwen2.5-3B-Instruct** (GGUF Q4_K_M, Apache-2.0) — ~2.5–4.6 s per short generation;
-fall back to 1.5B if latency matters more than answer quality. vLLM + a 7B model is the
-GPU tier (`--profile gpu`). See
+| Profile | Adds | Extra RAM | First-start download |
+|---|---|---|---|
+| default | 13 services | ~2.5–3 GB | TEI pulls `bge-small-en-v1.5` once (~130 MB) |
+| `--profile llm` | llama.cpp (Qwen2.5-3B) | ~3 GB | ~2 GB GGUF, once |
+| `--profile nli` | NLI faithfulness checker | ~1.5 GB | ~1 GB, once |
+
+Every heavy container declares an explicit `mem_limit`, and OpenSearch's JVM heap is capped
+(`-Xms512m -Xmx1g`). That matters on a box **without swap**, where an OOM spike kills a
+container outright rather than slowing it down: the limits stop one service starving the
+others. If the host is tight, copy `infra/compose/docker-compose.local.example.yml` to
+`docker-compose.local.yml` and shrink the heap there. Note that `docker stats` showing low
+`free` is normal — Linux holds reclaimable page cache, and `available` is the OOM-relevant
+figure. Dev profile only; production sizing lives in `infra/helm`.
+
+**LLM tier.** The default needs no model at all. Real local generation is `llama.cpp` on CPU
+serving **Qwen2.5-3B-Instruct** (GGUF Q4_K_M, Apache-2.0), a few seconds per short answer —
+drop to the 1.5B GGUF if latency matters more than answer quality. vLLM plus a larger model is
+the GPU tier (`--profile gpu`). See
 [`docs/adr/0006-llm-serving-and-model-choice.md`](docs/adr/0006-llm-serving-and-model-choice.md).
 
 **Why keep in-memory as the default:** it doubles as an adapter-conformance check (the
@@ -201,17 +218,26 @@ blocks the running API from calling any non-allowlisted host. Production must po
 ## Repository layout
 
 ```
-apps/            rag_api (modular monolith), demo_cli (walking-skeleton driver)
-services/        7 Phase-0 service modules (ingestion, doc-intelligence, indexing,
-                 retrieval, generation, guardrails-eval, control-plane incl. HITL + MCP stub)
-libs/            common (config/logging/tenancy/auth), schemas (pydantic contracts),
-                 rag-core (Protocols + pure logic, no framework lock-in), clients (adapters)
+apps/            api      — rag_api, the modular monolith that mounts every service router
+                 console  — React + Vite + TS admin SPA (nginx-served, proxies /v1)
+                 mcp      — MCP server (stdio + streamable HTTP) for agent clients
+                 widget   — dependency-free embeddable chat widget
+                 demo-cli — walking-skeleton driver (runs over ASGI, no network)
+services/        7 service modules: ingestion, doc-intelligence, indexing, retrieval,
+                 generation, guardrails-eval, control-plane (the /v1 API, HITL, workflows)
+libs/            common (config/logging/tenancy/auth/sovereignty), schemas (pydantic
+                 contracts), rag-core (Protocols + pure logic, no framework lock-in),
+                 clients (real adapters + their in-memory twins)
+sdks/            python + typescript clients over /v1
+sovereign-node/  Go libp2p node for the opt-in federation mesh (vendored deps)
 design/tokens/   design tokens (CSS vars, JSON, Tailwind preset)
-infra/           compose (local dev stack), helm (k8s skeleton, not deployed),
+infra/           compose (local dev stack), helm (k8s chart), k8s, airgap bundle,
                  otel/prometheus/grafana (observability)
-docs/adr/        Architecture Decision Records — read before reversing a decision
-tests/           integration (tenant isolation), e2e (vertical slice, golden-set eval)
-sample-data/     demo document + golden/ (eval ground truth)
+docs/adr/        26 Architecture Decision Records — read before reversing a decision
+scripts/         operational tooling: eval gate, RAGAS gate, calibration, backup, air-gap
+eval/            typed gold suites for the evaluation harness
+tests/           integration (tenant isolation, real stores), e2e (vertical slice)
+sample-data/     demo corpus + golden/ (eval ground truth)
 ```
 
 ## Development

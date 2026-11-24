@@ -97,8 +97,8 @@ migrate: ## Apply Alembic migrations (schema-per-tenant discipline)
 	uv run alembic -c libs/clients/alembic.ini upgrade head
 
 .PHONY: demo
-demo: ## Walking skeleton: ingest sample PDF -> ... -> grounded cited answer
-	uv run python -m demo_cli.run --seed --ask "What is the platform's uptime target?"
+demo: ## Walking skeleton: ingest -> grounded cited answer -> abstain. ARGS=--stores for real stores
+	uv run python -m demo_cli.run --seed --ask "What is the platform's uptime target?" $(ARGS)
 
 .PHONY: ci
 ci: lint typecheck test ## What CI runs on every PR
