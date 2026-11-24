@@ -1,0 +1,14 @@
+{
+  "departments": [
+    {
+      "dept": "hr",
+      "dev_secret": "dev-only-insecure-secret-change-me-32b+",
+      "peer_addr": "/ip4/10.0.0.11/tcp/4001/p2p/12D3KooWHRnodePeerIdReplaceMe"
+    },
+    {
+      "dept": "finance",
+      "pubkey_b64": "REPLACE_WITH_BASE64_ED25519_PUBLIC_KEY",
+      "peer_addr": "/ip4/10.0.0.12/tcp/4001/p2p/12D3KooWFinancePeerIdReplaceMe"
+    }
+  ]
+}

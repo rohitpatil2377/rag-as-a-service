@@ -1,0 +1,335 @@
+# Federated RAG umbrella values. One release = one department's isolated stack.
+# The air-gap profile (values-airgap.yaml) flips models to in-cluster self-hosted and drops
+# every external egress host — nothing here reaches the internet when airGap.enabled.
+
+global:
+  imageRegistry: registry.internal.acme/ragaas
+  imageTag: "1.0.0"
+  imagePullPolicy: IfNotPresent
+  # --- Service-mesh mTLS (linkerd) — ONE switch for the WHOLE release ---------------------------
+  # false (default): nothing is meshed; the render is identical to today's non-mesh deploy, so the
+  # live Docker-Compose QA stack and any current cluster are UNAFFECTED. This is a PREPARED layer.
+  # true: inject a linkerd mTLS sidecar into EVERY workload in the release — the api, the console,
+  # AND the sovereign-node subchart (this key lives under `global`, so Helm propagates it into the
+  # subchart's .Values automatically — one flag meshes everything). Requires the linkerd control
+  # plane to be installed first. See docs/deploy/K8S_LINKERD_CUTOVER.md before flipping this on.
+  # Flip the whole release with a single: --set global.linkerd.enabled=true
+  linkerd:
+    enabled: false
+
+# The department this whole stack belongs to (namespace is expected to match, e.g. rag-finance).
+department: "default"
+
+# AIR-GAP: when enabled the API fails-closed offline; the egress allowlist is in-cluster-only and
+# the API refuses to boot if any config would breach the air-gap (GET /v1/platform/airgap/preflight).
+airGap:
+  enabled: false
+
+# --- Control-plane API ------------------------------------------------------------------------
+api:
+  image: ""                       # empty -> {global.imageRegistry}/api:{global.imageTag}
+  replicas: 2
+  service:
+    port: 8000
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+  resources:
+    requests: { cpu: "500m", memory: "1Gi" }
+    # 4Gi headroom: OCR of large scanned PDFs renders pages to images and can exceed 2Gi -> OOMKilled.
+    limits: { memory: "4Gi" }
+    limits: { cpu: "2", memory: "2Gi" }
+  # Non-secret RAG_* config -> ConfigMap -> env. Store + model hosts are all IN-CLUSTER: this
+  # sovereign chart self-hosts every model by default (no external API), so the base deploy is
+  # already offline-shaped; air-gap just adds the enforcement flag + a locked egress allowlist.
+  config:
+    RAG_ENV: "prod"
+    RAG_INMEMORY: "false"
+    # Use the baked venv as-is: `uv run` must NOT try to sync/install from pypi at container start
+    # (there is no internet in a sovereign/air-gap cluster, and the runtime deps are already baked).
+    UV_NO_SYNC: "1"
+    UV_FROZEN: "1"
+    RAG_QDRANT_URL: "http://qdrant:6333"
+    RAG_OPENSEARCH_URL: "http://opensearch:9200"
+    RAG_MINIO_ENDPOINT: "minio:9000"
+    RAG_SOVEREIGN_ENFORCE: "true"
+    RAG_FEDERATION_ENABLED: "true"
+    RAG_GRAPHRAG_ENABLED: "true"
+    RAG_UNIFIED_KB_ENABLED: "true"
+    RAG_OTEL_ENABLED: "true"
+    # --- Brought CURRENT against the live deployment (infra/compose/docker-compose.deploy.example.yml +
+    #     docker-compose.mesh.example.yml). The chart predated this work; these are the non-secret keys the
+    #     live env carries. SECRET values (the *_API_KEY VALUES, the DSN password) stay OUT of the
+    #     chart — see api.secrets / the K8s Secret. Only header NAMES + endpoints + flags live here.
+    # Platform operator (SUPER_ADMIN) allowlist — bootstraps the fleet operator out-of-band (a super
+    # admin can't be authorised by any single tenant's RBAC). Just an email list, NOT a secret. Set
+    # per deployment, e.g. --set 'api.config.RAG_PLATFORM_ADMIN_EMAILS=superadmin@acme.example'.
+    RAG_PLATFORM_ADMIN_EMAILS: ""
+    # GraphRAG entity extraction for Indic corpora: translate-then-extract via the LLM gateway.
+    RAG_GRAPH_EXTRACT_BACKEND: "translate"
+    RAG_TRANSLATE_BACKEND: "llm"
+    RAG_GRAPH_SUMMARY_BACKEND: "llm"
+    # Write connected structured-source facts INTO the KB knowledge graph (shares entity nodes with
+    # documents). Query-time, additive, fail-safe. Needs graphrag + unified KB (both on above).
+    RAG_GRAPH_BRIDGE_ENABLED: "true"
+    # Fail-closed PII classification floor: raise a doc's data-classification (or block) when detected
+    # structured PII implies a higher level than requested. Per-ingest toggle; default policy = raise.
+    RAG_PII_CLASSIFICATION_ENABLED: "true"
+    RAG_PII_CLASSIFICATION_POLICY: "raise"
+    RAG_OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+    # acme deployment models — the HOSTED-sovereign profile the corpus was indexed with (the AIOps platform
+    # bge-m3 embedder, Jina reranker + AIOps bge-reranker fallback, Sarvam LLM). The migrated qdrant
+    # vectors are bge-m3/1024-dim, so the embedder here MUST stay bge-m3 or dense retrieval breaks.
+    # For the STRICT in-cluster/air-gap profile (all models local, zero external egress) deploy with
+    # -f values-airgap.yaml instead. Per-org generation models come from the DB registry at runtime.
+    RAG_LLM_BACKEND: "openai_compat"
+    # Platform DEFAULT generation model = the self-hosted Sarvam-30B on the GPU node (fast + sovereign,
+    # served as "/model" on gpu1). Per-org defaults in the DB registry override this; the hosted Sarvam
+    # API (sarvam-105b @ api.sarvam.ai) stays a selectable connection option, not the default. gpu1 is
+    # egress-allowed below (externalEgress 192.0.2.10 + RAG_ALLOWED_EGRESS_HOSTS).
+    RAG_VLLM_URL: "http://192.0.2.10:8000/v1"
+    RAG_LLM_MODEL: "/model"
+    RAG_LLM_REASONING_EFFORT: "off"
+    # SET THIS to the window the served model actually accepts (vLLM --max-model-len on gpu1).
+    # The code default is 128000; when it overstates the real window, the whole-document read
+    # takes its SINGLE full-read path (budget = min(whole_doc_full_read_token_budget,
+    # llm_context_window - reserve)) for documents the model cannot accept, and the tail of the
+    # document is silently truncated instead of map-reduced. Left commented because the correct
+    # value is whatever Sarvam-30B is served with here — it must be read off the server, not guessed.
+    # RAG_LLM_CONTEXT_WINDOW: "32768"
+    RAG_EMBED_BACKEND: "openai_compat"
+    RAG_TEI_URL: "https://models.example.internal/openai/v1"
+    RAG_EMBED_MODEL: "bge-m3"
+    RAG_EMBED_DIM: "1024"
+    RAG_EMBED_API_KEY_HEADER: "apikey"
+    RAG_RERANK_BACKEND: "openai_compat"
+    RAG_RERANK_URL: "https://api.jina.ai/v1"
+    RAG_RERANK_MODEL: "jina-reranker-v3.5"
+    RAG_RERANK_API_SHAPE: "cohere+sigmoid"
+    RAG_RERANK_API_KEY_HEADER: "Authorization"
+    RAG_RERANK_FALLBACK_URL: "https://models.example.internal/openai/v1"
+    RAG_RERANK_FALLBACK_MODEL: "bge-reranker"
+    RAG_RERANK_FALLBACK_API_SHAPE: "cohere"
+    RAG_RERANK_FALLBACK_API_KEY_HEADER: "apikey"
+    RAG_FAITHFULNESS_BACKEND: "nli"
+    RAG_NLI_URL: "http://nli-checker:80"
+    # Grounding + faithfulness thresholds and chunking — recalibrated on the live deployment for the
+    # jina-reranker-v3.5 post-sigmoid scale (0.50 sign-based separator) and finer clause chunks.
+    RAG_ABSTAIN_THRESHOLD: "0.50"
+    RAG_FAITHFUL_THRESHOLD: "0.4"
+    RAG_FLAG_THRESHOLD: "0.15"
+    RAG_CHUNK_SIZE: "250"
+    RAG_CHUNK_OVERLAP: "50"
+    # Reasoning-model answer budgets (a reasoning model spends tokens in <think> before the answer;
+    # a small cap starves it -> empty answers). These are ANSWER caps, not input/document size.
+    RAG_LLM_MAX_TOKENS: "4000"
+    RAG_HEAVY_MAX_TOKENS: "4000"
+    # Document OCR + vision = Chandra on Datalab's HOSTED API (www.datalab.to, X-API-Key =
+    # RAG_DATALAB_API_KEY secret). pdf_image_pages=ocr means EVERY PDF page that draws an image is
+    # sent through OCR — so figures/charts embedded on otherwise-texty pages are read too, not just
+    # textless/scanned pages. diagram_graph parses flowchart images into the GraphRAG graph.
+    RAG_OCR_BACKEND: "chandra_api"
+    RAG_VISION_LLM_BACKEND: "chandra_api"
+    RAG_PDF_IMAGE_PAGES: "ocr"
+    RAG_DIAGRAM_GRAPH_ENABLED: "true"
+    # Answer-behaviour parity with the demo tuning.
+    RAG_ARCHITECTURE_INTENT_ENABLED: "true"
+    RAG_ARCHITECTURE_MAX_TOKENS: "3000"
+    RAG_ARCHITECTURE_EXTRACT_RETRIES: "1"
+    RAG_FOLLOWUPS_ENABLED: "true"
+    RAG_FOLLOWUPS_BACKEND: "heuristic"   # instant, span-derived — no LLM call (llm backend is slow)
+    RAG_CLARIFY_ENABLED: "true"
+    RAG_CLARIFY_BACKEND: "heuristic"     # grounded "Did you mean …?" from spans — instant, no LLM call
+    # --- Feature flags that are ON in the live deployment (reconciled from the compose env) --------
+    RAG_MULTIMODAL_ENABLED: "true"
+    RAG_SEMANTIC_CACHE_ENABLED: "true"
+    RAG_AGENTIC_RETRY_ENABLED: "true"
+    RAG_ADAPTIVE_ROUTER_ENABLED: "true"
+    RAG_CONTEXTUAL_RETRIEVAL_ENABLED: "true"   # new-ingest-only; embeds contextualized chunk text
+    RAG_QUERY_TRANSFORM_ENABLED: "true"
+    RAG_AUTO_METADATA_ENABLED: "true"
+    RAG_FIELD_EXTRACTION_ENABLED: "true"
+    RAG_LANGUAGE_DETECTION_ENABLED: "true"
+    RAG_TRANSLATION_BACKEND: "llm"
+    RAG_NL2SQL_ENABLED: "true"
+    RAG_AGENTIC_WORKFLOWS_ENABLED: "true"
+    RAG_AGENT_ORCHESTRATOR_ENABLED: "true"
+    RAG_CONTINUOUS_EVAL_ENABLED: "true"
+    RAG_CONTINUOUS_EVAL_TICK_MINUTES: "1"
+    RAG_SYNC_SCHEDULER_ENABLED: "true"
+    # Bulk-ingest queue is a SHARED Postgres table; exactly ONE replica must drain it. With api
+    # replicas>1 and no Redis lease this races — pin to ONE drainer (a dedicated 1-replica worker
+    # release, or api.replicas=1) before enabling in a multi-replica deployment.
+    RAG_BULK_INGEST_WORKER_ENABLED: "false"
+    RAG_ALLOWED_EGRESS_HOSTS: "localhost,qdrant,opensearch,minio,postgres,tei,reranker,nli-checker,otel-collector,models.example.internal,api.jina.ai,api.sarvam.ai,www.datalab.to,192.0.2.10"
+  # Egress to sovereign endpoints OUTSIDE the cluster (same sovereign boundary, NOT the internet).
+  # Each entry opens ONE internal CIDR + port(s) in the rag-api-egress NetworkPolicy. Use when an
+  # LLM/model is served on a separate node (e.g. GPU vLLM). Empty = fully in-cluster (default).
+  # The host must ALSO be listed in config.RAG_ALLOWED_EGRESS_HOSTS (app-layer sovereignty guard).
+  externalEgress:
+    - cidr: 192.0.2.10/32   # self-hosted Sarvam-30B on the GPU node (per-question local model pick)
+      ports: [8000]
+  # Secret RAG_* values. NEVER commit real values — supply via `--set` / sealed-secret / Vault.
+  secrets:
+    RAG_POSTGRES_DSN: "postgresql+psycopg://rag:CHANGE_ME@postgres:5432/rag"
+    RAG_MINIO_ACCESS_KEY: "CHANGE_ME"
+    RAG_MINIO_SECRET_KEY: "CHANGE_ME"
+    RAG_LLM_API_KEY: ""              # Sarvam key (hosted profile); "" for keyless in-cluster (air-gap)
+    # Hosted-model API keys (acme profile). Empty here — supply real values via --set / sealed-secret:
+    RAG_EMBED_API_KEY: ""           # the AIOps platform bge-m3 (apikey header)
+    RAG_RERANK_API_KEY: ""          # Jina (Authorization: Bearer)
+    RAG_RERANK_FALLBACK_API_KEY: "" # the AIOps platform bge-reranker (apikey header)
+    RAG_DATALAB_API_KEY: ""         # Chandra OCR/vision
+    RAG_GRANT_SIGNING_KEY: "CHANGE_ME_BASE64_ED25519"
+    RAG_GRANT_SIGNING_KEY_ID: "2026-a"
+
+# --- Admin console (nginx-served SPA) ---------------------------------------------------------
+console:
+  enabled: true
+  image: ""                         # empty -> {global.imageRegistry}/console:{global.imageTag}
+  replicas: 2
+  service:
+    port: 80
+  resources:
+    requests: { cpu: "50m", memory: "64Mi" }
+    limits: { cpu: "250m", memory: "128Mi" }
+
+# --- In-cluster stores (StatefulSets). Set enabled:false to use external/managed stores. ------
+stores:
+  enabled: true
+  storageClass: ""                  # "" = cluster default StorageClass
+  # Store images are FULLY-QUALIFIED (docker.io/...) on purpose: kubelet's IfNotPresent
+  # cache-hit check matches the exact ref, so a pre-warmed/air-gapped node with the image
+  # already in containerd starts WITHOUT any registry lookup. A bare ref (opensearchproject/…)
+  # misses the local cache and forces a network pull — which fails on an offline/air-gap node.
+  postgres:
+    image: docker.io/library/postgres:16-alpine
+    storage: 5Gi
+    db: rag
+    user: rag
+    password: "CHANGE_ME"           # must match the password in api.secrets.RAG_POSTGRES_DSN
+  qdrant:
+    image: docker.io/qdrant/qdrant:v1.18.0
+    storage: 10Gi
+  opensearch:
+    image: docker.io/opensearchproject/opensearch:2.17.1
+    storage: 10Gi
+    javaOpts: "-Xms512m -Xmx512m"
+  minio:
+    # NOTE: this tag is NO LONGER PULLABLE anonymously — MinIO withdrew their public container
+    # images (Docker Hub repository removed; quay.io returns 401). Supply it from your own
+    # registry or licensed source, or substitute another S3 implementation. The dev and CI
+    # stacks moved to SeaweedFS for exactly this reason; see docker-compose.dev.yml.
+    image: docker.io/minio/minio:RELEASE.2024-10-13T13-34-11Z
+    storage: 20Gi
+    rootUser: "CHANGE_ME"           # must match api.secrets.RAG_MINIO_ACCESS_KEY
+    rootPassword: "CHANGE_ME"       # must match api.secrets.RAG_MINIO_SECRET_KEY
+
+# --- Self-hosted models (Deployments). The sovereign default: no external model API. -----------
+# Weights download once from huggingface.co on first start (dev), OR are pre-warmed into the
+# cache volume for a true air-gap install (see infra/airgap/manifest.env + airgap-bundle.sh).
+selfHostedModels:
+  offline: false   # HF_HUB_OFFLINE=1 on model pods: load from pre-warmed cache only (air-gap)
+  enabled: true
+  # In-cluster LLM (llama.cpp/Sarvam). Set false when the LLM is served on a separate
+  # sovereign node (e.g. a GPU vLLM) — the API then points RAG_VLLM_URL at that host and
+  # api.externalEgress opens the network path to it. tei/reranker/nli-checker stay in-cluster.
+  llmEnabled: true
+  cacheStorage: 10Gi
+  teiImage: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+  llamaImage: ghcr.io/ggml-org/llama.cpp:server
+  embedModel: BAAI/bge-m3   # 1024-dim to match the hosted acme embedder; bge-small (384) caused dim-mismatch errors
+  rerankModel: cross-encoder/ms-marco-MiniLM-L-6-v2
+  nliModel: MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7
+  # Sovereign INDIAN LLM (Sarvam AI, Apache-2.0, 22 Indian languages) served on llama.cpp. Use
+  # sarvamai/sarvam-1 (2B) on constrained hardware; sarvam-30b-gguf is the flagship (needs GPU).
+  llmModel: sarvamai/sarvam-30b-gguf:Q4_K_M
+  llmContext: "8192"
+
+# --- External entry point (Ingress) — OPTIONAL, default OFF -----------------------------------
+# The console (nginx) is the SINGLE public surface: it serves the SPA and reverse-proxies /v1,
+# /health, /api (Swagger) to the api on the SAME origin. So external access = an Ingress to the
+# CONSOLE Service; the api is reached THROUGH the console proxy, not exposed directly (the
+# sovereign default). enabled:false => NO Ingress renders (byte-identical to today's deploy).
+# Enable with e.g.:
+#   --set ingress.enabled=true --set ingress.host=rag.hr.example.internal \
+#   --set ingress.className=nginx --set ingress.tls.enabled=true --set ingress.tls.secretName=rag-hr-tls
+ingress:
+  enabled: false
+  className: ""                     # ingressClassName (e.g. "nginx", "traefik"); "" = cluster default
+  host: rag.example.internal        # the external hostname routed to the console
+  path: /
+  pathType: Prefix
+  annotations: {}                   # controller-specific, e.g. cert-manager.io/cluster-issuer: ...
+  tls:
+    enabled: false                  # true => terminate TLS using secretName (a pre-created K8s tls Secret)
+    secretName: ""
+  # OPTIONAL: additionally route /v1 + /api STRAIGHT to the api Service, bypassing the console
+  # proxy — for machine callers that don't want the SPA in the path. Default OFF (console proxy
+  # is the norm); when true the /v1 + /api prefixes take precedence over the console catch-all.
+  exposeApi: false
+
+# --- Self-contained observability sub-stack — OPTIONAL, default OFF ----------------------------
+# In-chart otel-collector + prometheus + grafana, mirroring the Compose topology and reusing the
+# EXACT configs from infra/otel, infra/prometheus, infra/grafana (copied under
+# files/observability/). SOVEREIGN: nothing is pulled from a community chart repo at deploy time.
+# enabled:false => NONE of it renders (byte-identical to today's deploy); the api still exports
+# OTLP to whatever RAG_OTEL_EXPORTER_OTLP_ENDPOINT points at.
+# MANAGED-OBSERVABILITY ALTERNATIVE: leave this disabled and point the api's
+# RAG_OTEL_EXPORTER_OTLP_ENDPOINT (api.config) at an EXTERNAL collector — label that collector's
+# namespace rag.local/plane=observability so the rag-api-egress NetworkPolicy admits it.
+# When ENABLED, the api's RAG_OTEL_EXPORTER_OTLP_ENDPOINT (default http://otel-collector:4317)
+# resolves to the in-chart collector Service — no api.config change needed.
+# Grafana is NOT exposed publicly: reach it via `kubectl port-forward svc/grafana 3000:3000` or an
+# optional Ingress. Its admin password comes from the rag-grafana-admin Secret (NOT inline).
+observability:
+  enabled: false
+  collector:
+    # Pinned to the Compose stack's tag (infra/compose/docker-compose.dev.yml). Fully-qualified
+    # docker.io/ ref so a pre-warmed/air-gapped node's containerd cache hits without a registry lookup.
+    image: docker.io/otel/opentelemetry-collector-contrib:0.111.0
+    resources:
+      requests: { cpu: "50m", memory: "128Mi" }
+      limits: { cpu: "500m", memory: "512Mi" }
+  prometheus:
+    image: docker.io/prom/prometheus:v2.54.1
+    retention: "15d"                # --storage.tsdb.retention.time
+    resources:
+      requests: { cpu: "100m", memory: "256Mi" }
+      limits: { cpu: "1", memory: "512Mi" }
+    persistence:
+      enabled: true
+      storage: 10Gi
+      storageClass: ""              # "" -> stores.storageClass, else cluster default
+  grafana:
+    image: docker.io/grafana/grafana:11.2.2
+    adminPassword: "admin"          # OVERRIDE via --set/sealed-secret; stored in the rag-grafana-admin Secret
+    resources:
+      requests: { cpu: "50m", memory: "128Mi" }
+      limits: { cpu: "500m", memory: "256Mi" }
+    persistence:
+      enabled: true
+      storage: 2Gi
+      storageClass: ""              # "" -> stores.storageClass, else cluster default
+
+# --- Sovereignty NetworkPolicy for the API (twin of RAG_SOVEREIGN_ENFORCE) -------------------
+networkPolicy:
+  enabled: true
+
+# --- Per-department federation node (libp2p mesh; subchart) ------------------------------------
+# NOTE: the linkerd mesh toggle is NOT set here — it rides on global.linkerd.enabled (top of this
+# file), which Helm propagates into this subchart automatically, so ONE switch meshes the node too.
+# The subchart still honours a standalone `sovereign-node.linkerd.enabled: true` for direct installs.
+sovereign-node:
+  enabled: true
+  department: "default"             # keep in sync with .department above
+  ragUrl: "http://rag-api:8000"
+  networkPolicy:
+    enabled: true
+
+# Overlay a fixed control-plane source file (RAGAS-wired quality.py) over the baked image so a
+# fresh install is self-contained without an image rebuild. Set false once the api image is rebuilt.
+qualityPatch:
+  enabled: true

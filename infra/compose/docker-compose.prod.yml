@@ -1,0 +1,151 @@
+# RAG as a Service — PRODUCTION deployment, one file.
+#
+# Deliberately NOT the dev stack. Development runs a five-file merge (dev + deploy + override +
+# mesh + local) whose order has caught us out more than once — mesh merges AFTER override, so a
+# value set in override is silently replaced. A production VM should not inherit that, nor the
+# p2p federation services, the model-emulator fixtures, or RAG_ENV=dev.
+#
+#   docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
+#
+# (--env-file and the api's env_file must name the SAME file; see the note on that service.)
+#
+# EVERY secret comes from the env file — nothing sensitive is committed here. Copy
+# .env.prod.example, fill it in ON THE TARGET VM, and keep it out of the image and out of git.
+#
+# This profile assumes the VM can reach the Acme model hosts (poc-aiops, uat-bodhi). It carries
+# no model weights: embeddings, reranking, generation and OCR are all remote. The one model that
+# runs locally is the NLI faithfulness checker, which is CPU-only.
+services:
+  postgres:                                 # catalog, audit chain, tenant config
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes: ["pg-data:/var/lib/postgresql/data"]
+    # No published port: only the api needs it, and it reaches it over the compose network.
+    # Publishing 5432 on a customer VM is an invitation nobody sent.
+    restart: unless-stopped
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  qdrant:                                   # dense vectors, one collection per KB
+    # Pinned: Qdrant's on-disk segment format is NOT guaranteed compatible across versions, and
+    # the client warns on skew. Bump this and the qdrant-client in lockstep, and never assume an
+    # in-place volume upgrade works.
+    image: qdrant/qdrant:v1.18.0
+    volumes: ["qdrant-data:/qdrant/storage"]
+    restart: unless-stopped
+    mem_limit: 4g
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  opensearch:                               # BM25, one index per KB
+    image: opensearchproject/opensearch:2.17.1
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true        # closed network only — see DEPLOY.md
+      - OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx2g
+    volumes: ["opensearch-data:/usr/share/opensearch/data"]
+    # Exit 137 on this service is how a previous deploy failed: it is the first thing to be
+    # OOM-killed when a build runs alongside startup. Keep mem_limit above the heap.
+    restart: unless-stopped
+    mem_limit: 4g
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  minio:                                    # raw document bytes, one prefix per KB
+    # NOTE: this tag is NO LONGER PULLABLE anonymously — MinIO withdrew their public container
+    # images (Docker Hub repository removed; quay.io returns 401). Supply it from your own
+    # registry or licensed source, or substitute another S3 implementation. The dev and CI
+    # stacks moved to SeaweedFS for exactly this reason; see docker-compose.dev.yml.
+    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+    volumes: ["minio-data:/data"]
+    restart: unless-stopped
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  nli-checker:                              # the faithfulness gate — the one LOCAL model
+    # Grounded-or-abstain depends on this: it scores whether each answer sentence is entailed by
+    # the retrieved spans. CPU-only. The weights are pulled ONCE on first start and cached in the
+    # volume; every start after that is offline. On a VM with no internet, pre-seed nli-cache or
+    # point HF_ENDPOINT at an internal mirror — otherwise first boot hangs here.
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    command: ["--model-id", "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7"]
+    volumes: ["nli-cache:/data"]
+    restart: unless-stopped
+    mem_limit: 8g
+
+  api:
+    image: ${RAG_IMAGE_API:-ragaas-api:latest}
+    # Wait for EVERY store, not just Postgres. The api starts in seconds and OpenSearch takes
+    # ~40; without this an operator who brings the stack up and immediately signs in gets a 500
+    # from a half-ready cluster and reasonably concludes the deployment is broken. Found by
+    # actually running this profile rather than reading it.
+    depends_on:
+      postgres: { condition: service_healthy }
+      opensearch: { condition: service_healthy }
+      qdrant: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    # BOTH mechanisms, and they are not the same thing: --env-file substitutes ${...} in THIS
+    # file, while env_file passes the ~90 RAG_* settings INTO the container. Point both at the
+    # same file. Default matches the DEPLOY guide's `cp .env.prod-vm.example .env.prod`.
+    env_file: ["${RAG_ENV_FILE:-.env.prod}"]
+    environment:
+      # env=prod is load-bearing, not cosmetic: it disables /v1/dev/token, which otherwise mints
+      # an admin JWT for ANY tenant to anyone who can reach the API. The console signs in through
+      # /v1/auth/login, so this does not affect real users.
+      - RAG_ENV=prod
+      - RAG_QDRANT_URL=http://qdrant:6333
+      - RAG_OPENSEARCH_URL=http://opensearch:9200
+      - RAG_MINIO_ENDPOINT=minio:9000
+      # The API's object-store credentials MUST match the ones MinIO was created with. Dev gets
+      # away without this because both sides default to minioadmin/minioadmin; the moment a
+      # deployment sets real credentials the two halves disagree and every ingest fails with
+      # InvalidAccessKeyId -- at first use, not at boot. Found by running this profile.
+      - RAG_MINIO_ACCESS_KEY=${MINIO_ROOT_USER}
+      - RAG_MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD}
+      - RAG_POSTGRES_DSN=postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - RAG_NLI_URL=http://nli-checker:80
+    # HOST_PORT, not API_PORT: RAG_API_PORT is an application setting the API itself reads as
+    # its listen port, so reusing that name makes the container listen somewhere the port mapping
+    # does not point and the API becomes unreachable. Cost me a probe deploy to find.
+    ports: ["${RAG_API_BIND:-127.0.0.1}:${RAG_API_HOST_PORT:-8000}:8000"]
+    restart: unless-stopped
+    mem_limit: 6g
+
+  console:
+    image: ${RAG_IMAGE_CONSOLE:-ragaas-console:latest}
+    depends_on:
+      api: { condition: service_started }
+    # Plain HTTP. Terminate TLS in front of this (reverse proxy or ingress) before a customer
+    # signs in over it — credentials and SOP content both cross this connection.
+    ports: ["${RAG_CONSOLE_BIND:-0.0.0.0}:${RAG_CONSOLE_HOST_PORT:-8082}:80"]
+    restart: unless-stopped
+    mem_limit: 256m
+
+volumes:
+  pg-data:
+  qdrant-data:
+  opensearch-data:
+  minio-data:
+  nli-cache:

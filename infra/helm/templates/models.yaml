@@ -1,0 +1,74 @@
+{{- if .Values.selfHostedModels.enabled }}
+{{- $sc := .Values.stores.storageClass }}
+{{- $m := .Values.selfHostedModels }}
+# =============================================================================================
+# Self-hosted models — the SOVEREIGN, INDIAN answer path. No external model API is used: the LLM
+# is Sarvam (Apache-2.0 open weights) on llama.cpp, embeddings/reranker/NLI are OSS models on TEI.
+# In air-gap, weights are pre-warmed into the cache PVCs (infra/airgap) — zero huggingface.co pull.
+# Pods carry rag.local/store="true" so the API egress NetworkPolicy admits them.
+# =============================================================================================
+{{- $models := dict
+  "tei"         (dict "image" $m.teiImage   "args" (list "--model-id" $m.embedModel) "port" 80 "cache" "/data")
+  "reranker"    (dict "image" $m.teiImage   "args" (list "--model-id" $m.rerankModel "--max-client-batch-size" "64") "port" 80 "cache" "/data")
+  "nli-checker" (dict "image" $m.teiImage   "args" (list "--model-id" $m.nliModel) "port" 80 "cache" "/data")
+}}
+{{- /* The in-cluster LLM (llama.cpp/Sarvam) is optional: set selfHostedModels.llmEnabled=false
+       when the LLM is served OUT of the cluster (e.g. a GPU vLLM on a separate sovereign node).
+       The API then points RAG_VLLM_URL at that host, which must be egress-allowlisted both at
+       the app layer (RAG_ALLOWED_EGRESS_HOSTS) and the network layer (api.externalEgress). */}}
+{{- if $m.llmEnabled }}
+{{- $_ := set $models "llama" (dict "image" $m.llamaImage "args" (list "-hf" $m.llmModel "--host" "0.0.0.0" "--port" "8080" "-c" $m.llmContext) "port" 8080 "cache" "/root/.cache/llama.cpp" "svcPort" 8000) }}
+{{- end }}
+{{- range $name, $spec := $models }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}-cache
+  labels: {{- include "rag.labels" $ | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- if $sc }}
+  storageClassName: {{ $sc | quote }}
+  {{- end }}
+  resources: { requests: { storage: {{ $m.cacheStorage | quote }} } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: {{- include "rag.labels" $ | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app.kubernetes.io/name: {{ $name }} }
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+        rag.local/store: "true"
+    spec:
+      containers:
+        - name: {{ $name }}
+          image: {{ $spec.image | quote }}
+          args: {{ toJson $spec.args }}
+          {{- if $.Values.selfHostedModels.offline }}
+          env: [{ name: HF_HUB_OFFLINE, value: "1" }, { name: TRANSFORMERS_OFFLINE, value: "1" }]
+          {{- end }}
+          ports: [{ name: http, containerPort: {{ $spec.port }} }]
+          volumeMounts: [{ name: cache, mountPath: {{ $spec.cache | quote }} }]
+      volumes:
+        - name: cache
+          persistentVolumeClaim: { claimName: {{ $name }}-cache }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "rag.labels" $ | nindent 4 }}
+spec:
+  selector: { app.kubernetes.io/name: {{ $name }} }
+  ports: [{ name: http, port: {{ $spec.svcPort | default $spec.port }}, targetPort: http }]
+{{- end }}
+{{- end }}

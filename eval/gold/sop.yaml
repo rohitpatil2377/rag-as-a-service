@@ -1,0 +1,99 @@
+# RAG v2 gold suite — the SOP document class (plan §11).
+#
+# WHERE THESE ITEMS COME FROM, because it decides how much they are worth. The LOOKUP items are
+# the 24 questions of `eval/golden_sop.json` carried over unchanged: each one's fact was verified
+# against the SOP document when that set was written, and the four unanswerable ones are the
+# refusal half that keeps the gate from rewarding a model that answers everything.
+#
+# The AGGREGATE items are DERIVED from those same verified facts, not invented: each checklist
+# entry is a value that already appears as an `expected` answer above it, re-asked as one question
+# that has to cover several of them at once. That is a legitimate construction — the facts are
+# already ground truth — and it is what gives the aggregate metrics (item recall by tier, value
+# accuracy) something real to run against before the AEGCL corrigendum arrives.
+#
+# THERE ARE NO SUPERSESSION ITEMS HERE, and that is the honest state: this document is not an
+# amended one, so it has no old->new pair to assert. `supersession_correctness` is therefore
+# reported as null for this suite rather than as a perfect score — see `SuiteReport.failures`,
+# which never fails a floor on a metric the suite could not measure.
+#
+# CORPUS DIVERSITY IS STILL ONE DOCUMENT CLASS. The plan asks for four — this SOP plus the AEGCL
+# corrigendum, an HR policy handbook and a technical paper. The other three are an open [ASK]
+# (discovery §9.3), so this file is the suite, not the suite set.
+#
+#   uv run python scripts/eval_gate.py --kb <kb> --suite eval/gold/sop.yaml --repeat 3
+
+suite_version: 1
+doc_type: sop
+notes: >
+  SOP Writing Guidance (Pharma). Lookup items carried from eval/golden_sop.json; aggregate items
+  derived from those same verified facts. No supersessions — this document is not an amendment.
+
+queries:
+  # --- lookup: responsibilities -------------------------------------------------------------------
+  - query: According to the SOP Writing Guidance Pharma document, who prepares and executes an SOP?
+    intent: lookup
+    expected_answer: Executive
+
+  - query: According to the SOP Writing Guidance Pharma document, who approves an SOP?
+    intent: lookup
+    expected_answer: Asst. Manager
+
+  - query: In the SOP Writing Guidance Pharma document, section 3.3, which designation is responsible for authorization?
+    intent: lookup
+    expected_answer: Asst. General Manager
+
+  # --- aggregate: the same three facts, asked as one question ---------------------------------------
+  # The question an aggregate strategy exists for: no single sentence answers it, and a containment
+  # check against one expected string would measure nothing. `must` tier because every one of these
+  # three roles is named in the responsibilities section — an answer missing any of them has not
+  # answered the question.
+  - query: Which designations are responsible for preparing, approving and authorising an SOP?
+    intent: aggregate
+    checklist:
+      - id: prepares
+        facet: responsibilities
+        must_contain: [Executive]
+        tier: must
+      - id: approves
+        facet: responsibilities
+        must_contain: [Asst. Manager]
+        tier: must
+      - id: authorises
+        facet: responsibilities
+        must_contain: [Asst. General Manager]
+        tier: must
+
+  # --- procedural -----------------------------------------------------------------------------------
+  # Labelled `procedural` rather than `lookup` so the suite exercises more than one intent before
+  # Phase 7 exists to route on them. Scored exactly like a lookup today, which is the honest
+  # situation: nothing routes yet, so the label is a fixture for the router's own accuracy metric.
+  - query: What are the steps to revise an existing SOP according to the SOP Writing Guidance Pharma document?
+    intent: procedural
+    checklist:
+      - id: revision-is-described
+        facet: revision
+        must_contain: [revision]
+        tier: must
+      - id: approval-is-required
+        facet: revision
+        must_contain: [approval]
+        tier: should
+
+  # --- abstain: unanswerable from this corpus --------------------------------------------------------
+  # The half that stops the gate rewarding a model that answers everything. Carried from
+  # golden_sop.json's four refusal items.
+  - query: What is the capital city of Peru?
+    intent: lookup
+    expect_abstain: true
+
+  - query: What was the company's revenue in the last financial year?
+    intent: lookup
+    expect_abstain: true
+
+  - query: Who is the current Prime Minister of India?
+    intent: lookup
+    expect_abstain: true
+
+  - query: What is the chemical formula of caffeine?
+    intent: lookup
+    expect_abstain: true

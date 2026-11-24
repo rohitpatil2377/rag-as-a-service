@@ -1,0 +1,23 @@
+{
+  "$doc": "Human-labelled calibration golden. Fill ~40 rows for a REAL statistical calibration of the abstain (FR-E2) and faithfulness (FR-E4) gates. See docs/golden-template.md. Run: uv run python scripts/calibrate.py --kb <kb> --golden this-file.json  (add --judge-url for faithfulness negatives).",
+  "kb_id": "REPLACE_WITH_THE_KB_THIS_CALIBRATES",
+  "items": [
+    {
+      "kind": "answerable",
+      "question": "What is the platform's uptime target?",
+      "expected_answer": "99.5 percent baseline and 99.9 percent at peak",
+      "$note": "answerable = the corpus genuinely covers this. Feeds the abstain POSITIVES (should pass) and the faithfulness POSITIVES (the real answer should score supported)."
+    },
+    {
+      "kind": "unanswerable",
+      "question": "What is the boiling point of helium on Jupiter?",
+      "$note": "unanswerable = plausible-sounding but NOT in the corpus. Feeds the abstain NEGATIVES (the gate must stop these). Aim for off-topic-but-realistic, not gibberish."
+    },
+    {
+      "kind": "unfaithful",
+      "question": "What is the platform's uptime target?",
+      "answer_to_judge": "The platform guarantees 100 percent uptime with a full refund on any downtime.",
+      "$note": "unfaithful = a plausible WRONG answer that the sources do NOT support (here it contradicts the real 99.5/99.9). Feeds the faithfulness NEGATIVES. REQUIRES --judge-url (an external judge scores this supplied answer against the retrieved sources); ignored without one."
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+# Pre-commit hooks — first line of defence for code quality & secret hygiene.
+# Install once: `uv run pre-commit install`
+minimum_pre_commit_version: "3.5.0"
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ["--maxkb=512"]           # model weights / data must not land in git
+      - id: check-merge-conflict
+      - id: detect-private-key          # hard stop on committed keys
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks                    # secret scanning (12-factor: no secrets in repo)

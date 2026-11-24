@@ -1,0 +1,24 @@
+[project]
+name = "rag-svc-doc-intelligence"
+version = "0.0.0"
+description = "RAG as a Service service module: doc-intelligence."
+requires-python = ">=3.11"
+dependencies = ["rag-common", "rag-schemas", "rag-core", "rag-clients", "fastapi>=0.111", "pypdf>=4.2", "pdfplumber>=0.11", "defusedxml>=0.7"]
+
+# Optional heavy backends (import-guarded, off by default):
+#   ocr      — scanned-document OCR (tesseract binary must also be present)
+#   pii      — Presidio NER masker (RAG_PII_MASKING_BACKEND=presidio)
+[project.optional-dependencies]
+ocr = ["pytesseract>=0.3.10", "pdf2image>=1.17", "Pillow>=10.0"]
+# paddleocr — stronger sovereign CPU OCR (PP-OCRv4) for low-quality scans + Indic scripts.
+# Pinned to the wheel-installable 2.7.x line (2.8+ pulls albumentations/stringzilla which
+# need a C toolchain). numpy is a transitive dep; listed for clarity.
+paddleocr = ["paddleocr>=2.7,<2.8", "paddlepaddle>=2.6,<3", "numpy>=1.24"]
+pii = ["presidio-analyzer>=2.2", "presidio-anonymizer>=2.2"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/svc_doc_intelligence"]

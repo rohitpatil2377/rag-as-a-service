@@ -1,0 +1,84 @@
+# Federated RAG per-department stack — hr (SANITIZED example). See values-hr.example.yaml.
+# Isolated stores; shared stateless model tier in acme ns; LLM on gpu1 vLLM.
+global: { imagePullPolicy: IfNotPresent }
+# Service-mesh mTLS (linkerd) — ONE switch for the whole release (api + console + node).
+# PREPARED, off by default. Flip to true at the K8s cutover AFTER installing the linkerd control
+# plane (see docs/deploy/K8S_LINKERD_CUTOVER.md). CLI: --set global.linkerd.enabled=true
+#   global: { linkerd: { enabled: true } }
+department: hr
+airGap: { enabled: false }
+api:
+  replicas: 1
+  autoscaling: { enabled: false }
+  image: registry.local/ragaas/api:local
+  networkPolicy: { enabled: false }   # POC: node netpol carries the federation isolation; tighten api egress later
+  externalEgress:
+    - { cidr: 192.0.2.10/32, ports: [8000] }   # gpu1 LLM
+  config:
+    RAG_QDRANT_URL: "http://qdrant:6333"
+    RAG_OPENSEARCH_URL: "http://opensearch:9200"
+    RAG_MINIO_ENDPOINT: "minio:9000"
+    RAG_TEI_URL: "http://tei:80"
+    RAG_RERANK_URL: "http://reranker:80"
+    RAG_RERANK_BACKEND: "cross_encoder"   # self-hosted TEI /rerank (native), not openai_compat/cohere
+    RAG_NLI_URL: "http://nli-checker:80"
+    RAG_LLM_BACKEND: "vllm"
+    RAG_VLLM_URL: "http://192.0.2.10:8000/v1"
+    RAG_LLM_MODEL: "/model"
+    RAG_FEDERATION_ENABLED: "true"
+    RAG_FAITHFUL_THRESHOLD: "0.4"
+    RAG_FLAG_THRESHOLD: "0.15"
+    RAG_AGENTIC_RETRY_ENABLED: "false"
+    RAG_AGENT_ORCHESTRATOR_ENABLED: "false"
+    RAG_QUERY_TRANSFORM_ENABLED: "false"
+    RAG_CONTEXTUAL_RETRIEVAL_ENABLED: "false"
+    RAG_FOLLOWUPS_ENABLED: "false"
+    RAG_CLARIFY_ENABLED: "false"
+    RAG_ADAPTIVE_ROUTER_ENABLED: "false"
+    RAG_LLM_MAX_TOKENS: "1500"
+    RAG_HEAVY_MAX_TOKENS: "1500"
+    RAG_FEDERATION_TRANSPORT: "mesh"
+    RAG_FEDERATION_NODE_URL: "http://hr-sovereign-node:7070"
+    RAG_FEDERATION_PEERS: '{"finance":{"transport":"mesh"},"tech":{"transport":"mesh"}}'
+    RAG_ALLOWED_EGRESS_HOSTS: "localhost,qdrant,opensearch,minio,postgres,tei,reranker,nli-checker,192.0.2.10"
+  secrets:
+    RAG_POSTGRES_DSN: "postgresql+psycopg://rag:CHANGE_ME@postgres:5432/rag"
+    RAG_MINIO_ACCESS_KEY: "CHANGE_ME"
+    RAG_MINIO_SECRET_KEY: "CHANGE_ME"
+    RAG_GRANT_SIGNING_KEY: ""          # EMPTY -> dev-derived key (interops with node --dev-secret)
+    RAG_GRANT_SIGNING_KEY_ID: "dev"
+console: { enabled: true, image: registry.local/ragaas/console:local }
+stores:
+  enabled: true
+  postgres: { password: "CHANGE_ME" }
+  minio: { rootUser: "CHANGE_ME", rootPassword: "CHANGE_ME" }
+selfHostedModels: { enabled: true, llmEnabled: false }
+sovereign-node:
+  enabled: true
+  department: hr
+  image: { repository: registry.local/ragaas/sovereign-node, tag: local, pullPolicy: IfNotPresent }
+  ragUrl: "http://rag-api:8000"
+  controlListen: "0.0.0.0:7070"
+  devSecret: "dev-only-insecure-secret-change-me-32b+"
+  registry: { enabled: true, configMapName: "hr-sovereign-node-registry" }
+  ragToken: { secretName: "hr-mesh-token", secretKey: "token" }
+  bootstrapPeers: []   # filled after PeerIDs known (phase B)
+  networkPolicy: { enabled: true }
+
+# --- OPTIONAL: external entry point (Ingress) — default OFF. Uncomment + edit to expose this
+#     department's console (the single public surface; it proxies /v1,/health,/api to the api).
+# ingress:
+#   enabled: true
+#   className: nginx                       # your cluster's IngressClass
+#   host: rag.hr.example.internal
+#   tls: { enabled: true, secretName: rag-hr-tls }   # pre-create the tls Secret (e.g. cert-manager)
+#   annotations: {}                       # e.g. cert-manager.io/cluster-issuer: internal-ca
+#   # exposeApi: true                      # also route /v1 + /api straight to the api (bypass console proxy)
+
+# --- OPTIONAL: in-chart observability (otel-collector + prometheus + grafana) — default OFF.
+#     Self-contained; reuses infra/otel + infra/prometheus + infra/grafana configs. Reach Grafana
+#     via `kubectl port-forward svc/grafana 3000:3000`. Managed alternative: leave this off and point
+#     api.config.RAG_OTEL_EXPORTER_OTLP_ENDPOINT at an external collector.
+# observability:
+#   enabled: true
+#   grafana: { adminPassword: "CHANGE_ME" }   # stored in the rag-grafana-admin Secret, not inline

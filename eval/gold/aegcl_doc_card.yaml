@@ -1,0 +1,87 @@
+# Phase 3 (document profile) + Phase 4 (section enrichment) acceptance, as a scorable artifact.
+#
+# WHY THIS EXISTS. Both phases were built, both were exercised on the real AEGCL corrigendum, and
+# neither acceptance was ever SCORED — `discovery.md` has carried "acceptance STILL UNVERIFIED"
+# for each since 2026-10-21. The reason was always the same: the plan states these acceptances in
+# prose, about an artifact (a profile card) rather than about an answer, and the shipped harness
+# scores answers. So there was nothing to run. This file is that prose turned into assertions, and
+# `scripts/score_doc_card.py` is the thing that runs it.
+#
+# EVERY EXPECTATION BELOW IS THE PLAN'S OWN, transcribed from §3 and §4 acceptance, not invented
+# here and not derived from what the pipeline happens to emit:
+#
+#   §3: "AEGCL fixture yields doc_type≈corrigendum, a relation 'amends' pointing to the original
+#        bidding document / Corrigendum-II, and facets covering eligibility, financial
+#        qualification, documentation/undertakings, supply-chain security, certifications/
+#        standards, OEM credentials, deployment/sovereignty, sizing/availability, lifecycle/
+#        support, training."
+#   §4: "On AEGCL, the MAAT section yields amends {old: 'Rs. 35 Crores', new: 'Rs. 19.44 Crores'};
+#        the router section's propositions include both HBOM and SBOM; >= 95% of quotes validate."
+#
+# FACETS ARE SCORED AS THEMES, NOT AS STRINGS. The plan names ten themes a facet list must cover;
+# it does not dictate the labels, and §3's own rule is that facets "must come from this document's
+# actual content, not a generic list". Scoring the model's label against a fixed vocabulary would
+# therefore punish it for obeying the instruction. Each theme below carries the alternative
+# spellings that mean it, and a theme counts as covered when any facet id matches one of them.
+#
+#   uv run python scripts/score_doc_card.py --card <profile.json> --sections <sections.json> \
+#       --gold eval/gold/aegcl_doc_card.yaml
+
+card_version: 1
+doc_id: corrigendum-5.pdf
+notes: >
+  AEGCL SOC/NOC Corrigendum-V (24-09-2026), NIT AEGCL/CGM/SLDC/T-161/Pt-23/26-27. Phase 3 profile
+  and Phase 4 section enrichment, scored against the upgrade plan's own §3 and §4 acceptance.
+
+# --- Phase 3: the document profile card ------------------------------------------------------
+profile:
+  doc_type: corrigendum
+  # The plan asks for a relation of type `amends` whose target is the original bidding document
+  # or Corrigendum-II. The target wording is the model's; only the TYPE and the fact that the
+  # target names the bidding document / an earlier corrigendum are asserted.
+  requires_relation:
+    type: amends
+    target_any_of: [bidding document, corrigendum, NIT, tender document]
+  # Every relation must carry a verbatim evidence_quote (§3 rule). Scored as a rate.
+  min_relation_quote_rate: 1.0
+  facet_themes:
+    - name: eligibility
+      any_of: [eligibility, bidder_eligibility, qualification_criteria, bidder]
+    - name: financial qualification
+      any_of: [financial, financial_qualification, turnover, financial_criteria]
+    - name: documentation / undertakings
+      any_of: [documentation, undertaking, vendor_undertaking, submission, data_requirement_sheet]
+    - name: supply-chain security
+      any_of: [supply_chain, supply_chain_security, sbom, hbom, bom]
+    - name: certifications / standards
+      any_of: [certification, certifications, standards, compliance_standards]
+    - name: OEM credentials
+      any_of: [oem, oem_credentials, manufacturer]
+    - name: deployment / sovereignty
+      any_of: [sovereignty, deployment, data_residency, indigenous, security_operations_centre]
+    - name: sizing / availability
+      any_of: [sizing, availability, capacity, performance, hci_infrastructure, infrastructure_hardware]
+    - name: lifecycle / support
+      any_of: [lifecycle, support, warranty, amc, maintenance]
+    - name: training
+      any_of: [training, knowledge_transfer, handholding]
+  # The plan lists ten themes. It does not say "all ten or fail", and one of them (training) is a
+  # minor clause in this document, so the bar is set where the card is genuinely usable for
+  # routing rather than at a perfect score. A miss is still reported per theme.
+  min_theme_coverage: 0.80
+
+# --- Phase 4: section enrichment --------------------------------------------------------------
+sections:
+  # The headline worked example from §4 acceptance. Matched on the section whose text contains the
+  # MAAT amendment, not on a section id, because ids are content hashes and change with the parse.
+  amends_cases:
+    - locate_by: Minimum Average Annual Turnover
+      old: Rs. 35 Crores
+      new: Rs. 19.44 Crores
+  # §4 acceptance names the router section's propositions specifically.
+  proposition_cases:
+    - locate_by: Router
+      must_mention: [HBOM, SBOM]
+  # §4's hard rule: "discard any item whose quote is not a substring of the section text", so the
+  # rate of quotes that DO validate is the direct measure of whether the enricher is grounded.
+  min_quote_validation_rate: 0.95

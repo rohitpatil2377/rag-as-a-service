@@ -1,0 +1,37 @@
+# Box-local resource tuning. COPY to `docker-compose.local.yml` to activate it — the Makefile
+# picks that filename up automatically (see `make compose-files`), and it is deliberately not
+# tracked, because the right values depend on the machine.
+#
+# The default `make up` is already laptop-sized: generation is `extractive_dev` (no model), and
+# the llama.cpp and NLI model servers are behind the `llm` / `nli` profiles, so nothing large is
+# downloaded or resident. Reach for this file when you turn those on, or when the box is small.
+services:
+  # OpenSearch is the memory-hungry one. Its heap is set in docker-compose.dev.yml; shrink it
+  # here if the host has less than ~8 GB free. Both numbers must match, and must stay under
+  # mem_limit, or the JVM is killed at startup (exit 137) rather than failing cleanly.
+  opensearch:
+    environment:
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+    mem_limit: 1g
+
+  # Only relevant with `--profile nli`: loading the mDeBERTa ONNX graph peaks well above the
+  # limit the service declares by default.
+  nli-checker:
+    mem_limit: 8g
+    mem_reservation: 1g
+
+  # Only relevant with `--profile llm`. Qwen2.5-3B at Q4_K_M with an 8k context needs ~3 GB;
+  # drop to the 1.5B GGUF in docker-compose.dev.yml's `command` if that does not fit.
+  llama:
+    mem_limit: 4g
+
+  # Host-port collisions are the most common first-run failure (another Postgres already on
+  # 5432, say). Remap the HOST side only — inside the compose network services still reach
+  # `postgres:5432`, so no application config changes.
+  #
+  # `!override` is REQUIRED here: Compose APPENDS list fields like `ports` across files, so
+  # without it the dev file's own `5432:5432` survives alongside yours and the bind still fails.
+  # Host-side tools then need the new port, e.g.
+  #   RAG_POSTGRES_DSN=postgresql+psycopg://rag:rag@localhost:15432/rag make migrate
+  postgres:
+    ports: !override ["127.0.0.1:15432:5432"]

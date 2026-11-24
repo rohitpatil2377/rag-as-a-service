@@ -1,0 +1,127 @@
+"""rag_common — cross-cutting foundation for RAG as a Service.
+
+Re-exports the stable surface used across services. Import from here, not submodules,
+for anything in this list so refactors stay internal.
+"""
+
+from rag_common.auth import (
+    Principal,
+    authenticate,
+    get_principal,
+    issue_dev_jwt,
+    register_api_key_resolver,
+    require_roles,
+)
+from rag_common.config import AppEnv, Settings, get_settings, model_tls_verify
+from rag_common.coordination import Coordinator, get_coordinator, get_redis_client, reset_coordinator
+from rag_common.crypto import (
+    decrypt_secret,
+    decrypt_with_dek,
+    encrypt_secret,
+    encrypt_with_dek,
+    generate_dek,
+    get_key_wrapper,
+    unwrap_dek,
+    wrap_dek,
+)
+from rag_common.errors import (
+    ApprovalRequiredError,
+    ConfigError,
+    ConflictError,
+    ConnectorError,
+    ForbiddenError,
+    GroundingAbstain,
+    ModelGatewayError,
+    NotFoundError,
+    PlatformError,
+    QuotaExceededError,
+    RateLimitError,
+    RetrievalError,
+    SovereigntyViolationError,
+    TenantIsolationError,
+    UnauthorizedError,
+    ValidationError,
+)
+from rag_common.logging import configure_logging, get_logger
+from rag_common.passwords import hash_password, verify_dummy, verify_password
+from rag_common.secrets import SecretsProvider, get_secrets_provider
+from rag_common.sovereignty import assert_sovereign
+from rag_common.tenancy import (
+    assert_registrable,
+    current_tenant,
+    layout_object_key,
+    object_prefix,
+    org_of,
+    pg_schema,
+    raw_object_key,
+    sparse_index,
+    tenant_scope,
+    vector_collection,
+    vision_collection,
+)
+from rag_common.timing import StageTimeline
+from rag_common.tracing import current_traceparent, get_tracer, init_tracing
+
+__all__ = [
+    "AppEnv",
+    "ApprovalRequiredError",
+    "ConfigError",
+    "ConflictError",
+    "ConnectorError",
+    "Coordinator",
+    "ForbiddenError",
+    "GroundingAbstain",
+    "ModelGatewayError",
+    "NotFoundError",
+    "PlatformError",
+    "Principal",
+    "QuotaExceededError",
+    "RateLimitError",
+    "RetrievalError",
+    "SecretsProvider",
+    "Settings",
+    "SovereigntyViolationError",
+    "StageTimeline",
+    "TenantIsolationError",
+    "UnauthorizedError",
+    "ValidationError",
+    "assert_registrable",
+    "assert_sovereign",
+    "authenticate",
+    "configure_logging",
+    "current_tenant",
+    "current_traceparent",
+    "decrypt_secret",
+    "decrypt_with_dek",
+    "encrypt_secret",
+    "encrypt_with_dek",
+    "generate_dek",
+    "get_coordinator",
+    "get_key_wrapper",
+    "get_logger",
+    "get_principal",
+    "get_redis_client",
+    "get_secrets_provider",
+    "get_settings",
+    "get_tracer",
+    "hash_password",
+    "init_tracing",
+    "issue_dev_jwt",
+    "layout_object_key",
+    "model_tls_verify",
+    "object_prefix",
+    "org_of",
+    "pg_schema",
+    "raw_object_key",
+    "register_api_key_resolver",
+    "require_roles",
+    "reset_coordinator",
+    "sparse_index",
+    "tenant_scope",
+    "unwrap_dek",
+    "vector_collection",
+    "verify_dummy",
+    "verify_password",
+    "vision_collection",
+    "wrap_dek",
+]

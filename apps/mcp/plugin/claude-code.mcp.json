@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "ragaas": {
+      "type": "http",
+      "url": "https://<HOST>/mcp/",
+      "headers": { "Authorization": "Bearer <PLATFORM_JWT_OR_API_KEY>" }
+    }
+  }
+}

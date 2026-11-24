@@ -1,0 +1,129 @@
+{{- if .Values.networkPolicy.enabled }}
+# =============================================================================================
+# STRICT federation isolation — the WHOLE POINT of the per-department node. Default-deny both
+# directions; admit only the control plane + peer nodes (ingress libp2p), this dept's own
+# rag-api (ingress control :7070 + egress :8000), configured peers (egress libp2p), and DNS.
+# =============================================================================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sovereign-node.fullname" . }}
+  labels:
+    {{- include "sovereign-node.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "sovereign-node.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # (a) federation control plane -> libp2p (grant issuance / peer discovery).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.controlPlaneNamespaceLabel | nindent 14 }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.controlPlaneSelector | nindent 14 }}
+      ports:
+        - port: libp2p
+          protocol: TCP
+    # (b) peer department nodes -> libp2p (any ns, shared sovereign-node app label).
+    - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.peerSelector | nindent 14 }}
+      ports:
+        - port: libp2p
+          protocol: TCP
+    {{- if or .Values.linkerd.enabled (dig "linkerd" "enabled" false (.Values.global | default dict)) }}
+    # (b2) linkerd: peer proxies dial this node's proxy inbound port (4143) for mTLS; and the
+    #      linkerd control plane scrapes proxy admin/tap (4190/4191).
+    - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.peerSelector | nindent 14 }}
+      ports:
+        - port: 4143
+          protocol: TCP
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: linkerd
+      ports:
+        - port: 4190
+          protocol: TCP
+        - port: 4191
+          protocol: TCP
+    {{- end }}
+    {{- if .Values.controlListen }}
+    # (c) this dept's OWN rag-api -> control :7070 (drives outbound /federate). Same namespace
+    #     only (no namespaceSelector = this pod's namespace), so no other dept can reach it.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: rag-api
+      ports:
+        - port: control
+          protocol: TCP
+    {{- end }}
+
+  egress:
+    # (a) DNS (CoreDNS in kube-system) — resolve rag-api Service + dns4 peer multiaddrs.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # (b) this department's OWN rag-api (:8000) — the node fronts it and nothing else.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: rag-api
+      ports:
+        - port: 8000
+          protocol: TCP
+    # (c) peer nodes on the mesh (:4001) — bootstrap dial + federated-query streams.
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.peerSelector | nindent 14 }}
+      ports:
+        - port: {{ .Values.listenPort }}
+          protocol: TCP
+    {{- if or .Values.linkerd.enabled (dig "linkerd" "enabled" false (.Values.global | default dict)) }}
+    # (d) linkerd: this node's proxy needs the control plane (identity 8080, dst 8086,
+    #     policy 8090) and dials peer proxies on 4143 for mTLS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: linkerd
+      ports:
+        - port: 8080
+          protocol: TCP
+        - port: 8086
+          protocol: TCP
+        - port: 8090
+          protocol: TCP
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.peerSelector | nindent 14 }}
+      ports:
+        - port: 4143
+          protocol: TCP
+    {{- end }}
+{{- end }}

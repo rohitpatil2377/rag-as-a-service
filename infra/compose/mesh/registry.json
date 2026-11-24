@@ -1,0 +1,8 @@
+{
+  "departments": [
+    { "dept": "dept-a", "dev_secret": "dev-only-insecure-secret-change-me-32b+", "peer_addr": "/dns4/ragaas-dev-node-a-1/tcp/4001/p2p/12D3KooWEGnzKX2PbLpVoAotPo8KiqiyhCix6BP6astNevBrmsFP" },
+    { "dept": "dept-b", "dev_secret": "dev-only-insecure-secret-change-me-32b+", "peer_addr": "/dns4/ragaas-dev-node-b-1/tcp/4001/p2p/12D3KooWJ8wBAHXPd5W8bJhdBQVzPCU21NVjegNARYfX38zG5TLA" },
+    { "dept": "dept-c", "dev_secret": "dev-only-insecure-secret-change-me-32b+", "peer_addr": "/dns4/ragaas-dev-node-c-1/tcp/4001/p2p/12D3KooWAMLhvoS6tWoLHHAWbUtLH83LZGbz8DonoCpg2xBZRbgg" },
+    { "dept": "dept-d", "dev_secret": "dev-only-insecure-secret-change-me-32b+", "peer_addr": "/dns4/ragaas-dev-node-d-1/tcp/4001/p2p/12D3KooWH5wjhCwmoC8FPsLoqAhqvx9xyWuhKAxdh23jwhjX4Xev" }
+  ]
+}

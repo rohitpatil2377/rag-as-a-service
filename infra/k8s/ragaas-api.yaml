@@ -1,0 +1,182 @@
+# RAG as a Service — control-plane API on Kubernetes (per-department namespace).
+#
+# Plain manifests (no Helm templating) so they apply and validate anywhere:
+#   kubectl apply -n rag-<dept> --dry-run=server -f infra/k8s/ragaas-api.yaml
+# The federation sovereign-node ships as a Helm chart (infra/helm/sovereign-node) — one release
+# per department. Stores (Qdrant/OpenSearch/MinIO/Postgres) are external/managed or their own
+# StatefulSets; this file wires the stateless API + its sovereignty NetworkPolicy + autoscaling.
+#
+# Replace REPLACE_* before apply. Secrets belong in a sealed/External Secret, never committed.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rag-api-config
+  labels:
+    app.kubernetes.io/name: rag-api
+    app.kubernetes.io/part-of: ragaas
+data:
+  # Non-secret config → env. Store hosts stay INSIDE the cluster (the NetworkPolicy enforces it).
+  RAG_ENV: "prod"
+  RAG_INMEMORY: "false"
+  RAG_QDRANT_URL: "http://qdrant:6333"
+  RAG_OPENSEARCH_URL: "http://opensearch:9200"
+  RAG_MINIO_ENDPOINT: "minio:9000"
+  RAG_TEI_URL: "http://tei:80"
+  RAG_RERANK_URL: "http://reranker:80"
+  RAG_NLI_URL: "http://nli-checker:80"
+  RAG_OTEL_ENABLED: "true"
+  RAG_OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+  RAG_REDIS_URL: "redis://redis:6379"           # coordinator: leader-elect scheduler + bulk-ingest
+  RAG_SOVEREIGN_ENFORCE: "true"
+  RAG_FEDERATION_ENABLED: "true"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rag-api-secrets
+  labels:
+    app.kubernetes.io/name: rag-api
+    app.kubernetes.io/part-of: ragaas
+type: Opaque
+stringData:
+  # PLACEHOLDERS — inject via a sealed-secret / External Secret / Vault, do NOT commit real values.
+  RAG_POSTGRES_DSN: "postgresql+psycopg://rag:REPLACE_PW@postgres:5432/rag"
+  RAG_MINIO_ACCESS_KEY: "REPLACE"
+  RAG_MINIO_SECRET_KEY: "REPLACE"
+  # Federation grant signing key (base64 raw Ed25519) + kid; rotate by moving the old public key
+  # into RAG_GRANT_RETIRED_VERIFY_KEYS (see the grant-key-rotation feature).
+  RAG_GRANT_SIGNING_KEY: "REPLACE_BASE64_ED25519"
+  RAG_GRANT_SIGNING_KEY_ID: "2026-a"
+  RAG_GRANT_RETIRED_VERIFY_KEYS: "[]"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-api
+  labels:
+    app.kubernetes.io/name: rag-api
+    app.kubernetes.io/part-of: ragaas
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rag-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: rag-api
+        app.kubernetes.io/part-of: ragaas
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: registry.internal.acme/ragaas/api:REPLACE_TAG
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: rag-api-config
+            - secretRef:
+                name: rag-api-secrets
+          # Liveness: process-only — a store blip must NOT restart the pod (that would
+          # restart-loop every replica). Readiness: store reachability — a blip sheds traffic
+          # WITHOUT a restart, and the pod rejoins the Service when the store returns.
+          livenessProbe:
+            httpGet: { path: /livez, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests: { cpu: "500m", memory: "1Gi" }
+            limits: { cpu: "2", memory: "2Gi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rag-api
+  labels:
+    app.kubernetes.io/name: rag-api
+    app.kubernetes.io/part-of: ragaas
+spec:
+  selector:
+    app.kubernetes.io/name: rag-api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: rag-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: rag-api
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: rag-api
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rag-api
+---
+# Sovereignty control (FR): the API may egress ONLY to in-cluster stores + DNS — never to a
+# foreign/managed endpoint. This is the enforced twin of RAG_SOVEREIGN_ENFORCE. GPU inference
+# (vllm) is in-cluster too; a HOSTED model API would need an explicit egress rule (and is a
+# sovereignty caveat until self-hosted — see the runbook's GPU section).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rag-api-egress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: rag-api
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              rag.local/store: "true"     # label Qdrant/OpenSearch/MinIO/Postgres/TEI/reranker/nli/redis pods
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: vllm
+    - ports:                              # DNS
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              rag.local/plane: observability   # OTel collector

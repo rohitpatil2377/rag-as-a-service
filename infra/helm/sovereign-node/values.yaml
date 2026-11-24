@@ -1,0 +1,99 @@
+# Federated RAG per-department federation node — Helm values.
+#
+# One release per department (e.g. `helm install hr ./sovereign-node -f values-hr.yaml`).
+# The whole point of this chart is DATA SOVEREIGNTY PER DEPARTMENT: the node only ever
+# talks to (a) its OWN department's rag-api and (b) explicitly configured peer nodes.
+# The NetworkPolicy (templates/networkpolicy.yaml) makes that a hard, enforced boundary.
+
+# The department this node represents (→ container flag --dept / env SOVEREIGN_DEPT).
+# REQUIRED — set per release (hr, finance, legal, …). Used in labels + the NetworkPolicy
+# peer selectors, so it must be stable and unique per department.
+department: ""
+
+image:
+  repository: registry.internal.acme/ragaas/sovereign-node   # sovereign internal registry
+  tag: "0.1.0-phase1"
+  pullPolicy: IfNotPresent
+
+# The local department rag-api this node fronts (→ --rag-url / env SOVEREIGN_RAG_URL).
+# In-cluster service DNS — egress is locked to this host by the NetworkPolicy.
+ragUrl: http://rag-api:8000
+
+# libp2p listen port (→ --listen /ip4/0.0.0.0/tcp/<listenPort>).
+listenPort: 4001
+
+# Bootstrap peer multiaddrs of OTHER department nodes to dial on start (…/p2p/<peerid>).
+# Each entry becomes an allowed egress target in the NetworkPolicy (see below). Empty =
+# an isolated node that only serves its own dept until peers/grants are configured.
+bootstrapPeers: []
+  # - "/dns4/finance-sovereign-node.finance.svc.cluster.local/tcp/4001/p2p/<peerid>"
+
+resources:
+  requests: { cpu: "100m", memory: "128Mi" }
+  limits: { cpu: "500m", memory: "256Mi" }
+
+# mTLS / libp2p identity key. The node keeps a stable Ed25519 identity; in prod the key is
+# injected as a Secret (templates/secret.yaml) rather than generated on the fly, so a peer
+# id survives restarts and can be pinned in other depts' bootstrap lists / grant records.
+identity:
+  # If set, the chart renders a Secret with this PEM/base64 key material. Leave empty to let
+  # the operator create/manage the Secret out-of-band (recommended: seal it, do NOT commit).
+  keyPem: ""
+  secretName: ""            # override the generated Secret name; default <release>-sovereign-node-identity
+
+networkPolicy:
+  # STRICT egress+ingress isolation is the sovereignty control — keep enabled in every real
+  # deployment. Disable ONLY for local kind/minikube smoke tests with no CNI policy support.
+  enabled: true
+  # Namespace label used to find the federation control plane (grant issuance / peer discovery).
+  # Ingress is allowed from pods carrying controlPlaneSelector in a namespace so labelled.
+  controlPlaneNamespaceLabel:
+    rag.local/plane: federation
+  controlPlaneSelector:
+    app.kubernetes.io/part-of: sovereign-federation
+  # Peer nodes are matched by this label (every sovereign-node release carries it). Ingress
+  # from and egress to peer nodes is allowed; the department differs per pod but the app label
+  # is shared, which is how the mesh members recognise each other.
+  peerSelector:
+    app.kubernetes.io/name: sovereign-node
+
+# --- k8s wiring for the flag-driven Go binary (added for the real k8s deployment) ------------
+# Control API address; enables the OUTBOUND /federate path the co-located rag-api drives.
+# Empty = disabled (inbound-only). 0.0.0.0:7070 so the dept's rag-api can reach it (fenced by
+# the NetworkPolicy to rag-api only).
+controlListen: "0.0.0.0:7070"
+
+# Max clock skew (s) for accepting a federated query; also bounds the replay-nonce cache (ADR-0021).
+replaySkewSeconds: 120
+
+# Dev grant-signing secret (POC interop with the Python signer: key = sha256("grant-dev::"+secret)).
+# POC-only; leave empty for real deployments (grants come signed from the control-plane).
+devSecret: ""
+
+# Operator registry (dept -> pubkey/dev_secret + /dns4 peer_addr) as a ConfigMap, mounted at
+# /etc/sovereign/registry/registry.json. Create it out-of-band with the per-dept identities.
+registry:
+  enabled: false
+  configMapName: ""     # default: <release>-sovereign-node-registry
+
+# Bearer token this node uses to call its OWN rag-api /retrieve. Sourced from a Secret so it
+# never lands in the pod spec (referenced as $SOVEREIGN_RAG_TOKEN in the container command).
+ragToken:
+  secretName: ""        # empty = no token
+  secretKey: "token"
+
+# Persist the libp2p identity key to a small PVC (/data/node.key) so the PeerID is STABLE across
+# restarts/upgrades (peers pin it in bootstrap + grants). Recommended for any real mesh.
+persistence:
+  enabled: false
+  size: 64Mi
+  storageClass: ""
+
+# Inject a linkerd mTLS sidecar into the node so cross-department federation carries
+# SPIFFE identity + mesh mTLS on top of libp2p Noise. Requires the netpol linkerd rules.
+# Standalone install: set this to true. As a subchart of the ragaas umbrella you normally
+# leave this false and flip the release-wide `global.linkerd.enabled` instead — the templates
+# honour EITHER (or .Values.linkerd.enabled global.linkerd.enabled), so one umbrella switch
+# meshes this node too.
+linkerd:
+  enabled: false

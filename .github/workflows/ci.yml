@@ -1,0 +1,73 @@
+# RAG as a Service — CI. Runs on every push/PR.
+# Gates: ruff (lint+format), mypy (strict), pytest (unit), docker build.
+# The golden-set eval gate (FR-G5) runs in a separate job against the dev stack.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - name: Sync workspace
+        run: uv sync --all-packages --group dev
+      # Call the Makefile target rather than restating its commands. Restating them is how this
+      # job's mypy scope silently drifted from the Makefile's once already — it omitted
+      # `sdks/python`, and a defect shipped through the gap. One definition, one scope.
+      - name: Quality gate (ruff + mypy strict + unit tests)
+        run: make ci
+      # The e2e suite needs no infrastructure at all — it runs the in-memory profile — so there is
+      # no reason for it to sit outside every gate, which is where it used to be. `make ci`
+      # deliberately excludes it, hence the separate step.
+      - name: E2E tests (in-memory profile)
+        run: uv run pytest -q -m e2e
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build API monolith image
+        run: docker build -f apps/api/Dockerfile -t ragaas-api:ci .
+
+  # Integration + golden-set eval gate run against the compose stack.
+  # Kept as a separate job so it can be marked required once dev stores are wired in CI.
+  eval-gate:
+    runs-on: ubuntu-latest
+    needs: [quality]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+      - name: Sync workspace
+        run: uv sync --all-packages --group dev
+      # The stores AND the reranker. The golden gate is skipped without a real cross-encoder:
+      # the in-memory twin scores term overlap, whose answerable and unanswerable populations
+      # overlap (measured — see abstain_threshold_lexical), so a pass from it is a coincidence.
+      - name: Bring up the sovereign stack
+        run: make up
+      - name: Migrate
+        run: make migrate
+      - name: Eval gate
+        run: uv run pytest -m "integration or eval" -q
+      # Skips are not passes here: this job exists to gate, and a silently-skipped gate is the
+      # `echo` it replaced. Fail if the release gate did not actually run.
+      - name: Assert the release gate ran
+        run: uv run pytest -m eval -q --no-header -rs | tee /dev/stderr | grep -q "passed"
+      - name: Stack logs on failure
+        if: failure()
+        run: make logs || true
+      - name: Tear down
+        if: always()
+        run: make down || true

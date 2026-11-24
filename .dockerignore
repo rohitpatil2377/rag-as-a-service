@@ -1,0 +1,22 @@
+# Keep build contexts lean + reproducible (applies to every image built from repo root).
+.git
+**/node_modules
+.venv
+**/.venv
+**/__pycache__
+**/*.pyc
+**/dist
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+*.bundle
+
+# AI-assistant / dev-orchestration artifacts — NEVER ship these inside a delivered image.
+**/.omc
+**/.claude
+**/CLAUDE.md
+**/AGENTS.md
+**/GEMINI.md
+**/.cursor
+**/claude-code.mcp.json
+**/cursor.mcp.json

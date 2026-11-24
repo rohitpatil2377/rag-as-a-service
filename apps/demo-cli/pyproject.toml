@@ -1,0 +1,22 @@
+[project]
+name = "rag-demo-cli"
+version = "0.0.0"
+description = "RAG as a Service — walking-skeleton demo driver (`make demo`)."
+requires-python = ">=3.11"
+dependencies = [
+    "rag-common",
+    "rag-schemas",
+    "rag-api",
+    "httpx>=0.27",
+    "fpdf2>=2.7",
+]
+
+[project.scripts]
+rag-demo = "demo_cli.run:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/demo_cli"]

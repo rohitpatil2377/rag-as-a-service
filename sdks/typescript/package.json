@@ -1,0 +1,14 @@
+{
+  "name": "@ragaas/rag-sdk",
+  "version": "0.1.0",
+  "description": "RAG as a Service — official TypeScript SDK (sovereign, typed client for the /v1 API).",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "license": "UNLICENSED"
+}

@@ -1,0 +1,19 @@
+{{- if .Values.persistence.enabled }}
+# Tiny PVC holding this node's STABLE libp2p Ed25519 identity key (/data/node.key). The peer id
+# is derived from this key; persisting it means the PeerID survives restarts/upgrades so peers'
+# bootstrap lists + grant records stay valid. Matches the Dockerfile VOLUME /data (uid 10001).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "sovereign-node.fullname" . }}-data
+  labels:
+    {{- include "sovereign-node.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- if .Values.persistence.storageClass }}
+  storageClassName: {{ .Values.persistence.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size | default "64Mi" }}
+{{- end }}

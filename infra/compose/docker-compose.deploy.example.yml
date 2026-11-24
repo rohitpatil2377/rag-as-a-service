@@ -1,0 +1,154 @@
+# Non-secret deployment config for the isolated multilingual / Federated RAG deployment.
+# Model choices, endpoints, thresholds, tuning, and feature flags — VERSION-CONTROLLED so the
+# deployment is reproducible and reviewable. SECRETS (the API-key VALUES) live ONLY in the
+# gitignored docker-compose.override.yml. The key HEADERS here are just header NAMES, not secret.
+#
+# Compose merge order (later wins): docker-compose.dev.yml -> docker-compose.deploy.yml -> docker-compose.override.yml
+#   deploy:   this file  — all non-secret config
+#   override: gitignored — ONLY the *_API_KEY values
+# Deploy:  docker compose -f docker-compose.dev.yml -f docker-compose.deploy.yml -f docker-compose.override.yml up -d
+services:
+  api:
+    # Crash/reboot resilience: a recreate or host reboot must bring the api back automatically
+    # (a `docker update --restart` is dropped on the next `compose up` recreate — this persists it).
+    restart: unless-stopped
+    environment:
+      - RAG_ENV=dev
+      - RAG_OTEL_ENABLED=true
+      # Platform operator (SUPER_ADMIN) allowlist — bootstraps the fleet operator out-of-band, since
+      # a super admin cannot be authorised by any single tenant's RBAC. Not a secret (just an email).
+      - RAG_PLATFORM_ADMIN_EMAILS=superadmin@acme.example
+      # --- Generation: Sarvam-105b (reasoning model) ---
+      - RAG_LLM_BACKEND=openai_compat
+      - RAG_VLLM_URL=https://models-uat.example.internal/openai/v1
+      - RAG_LLM_MODEL=gemma4-31b
+      # apikey, not Authorization: probed against this endpoint — Authorization 401, apikey 200.
+      - RAG_LLM_API_KEY_HEADER=apikey
+      # Generous output budget: a reasoning model spends tokens in <think> before the answer, so a
+      # small cap starves it (empty answers). This is the ANSWER cap, not the input/document size.
+      - RAG_LLM_MAX_TOKENS=4000
+      # Comprehensive/"list everything" answers on a reasoning model need room for <think> + a long
+      # answer — matches LLM_MAX_TOKENS so the thorough path doesn't truncate.
+      - RAG_HEAVY_MAX_TOKENS=4000
+      # NL→SQL has its OWN cap. The reasoning model spends most tokens in <think> before the SQL, so
+      # the 1500 default returns content=null ("empty SQL") on a large schema prompt (10 tables ~7k
+      # chars). 4000 gives it room to finish thinking AND emit the query.
+      - RAG_NL2SQL_MAX_TOKENS=4000
+      # Disable the reasoning model's <think> phase (sends reasoning_effort=null). The Sarvam
+      # starter tier caps max_tokens at 4096, and thinking is billed against that budget — on a
+      # large prompt the model spent the whole budget thinking and returned an EMPTY completion
+      # ("empty SQL" in NL→SQL). Off = the model answers directly, fast + within budget. Set to
+      # low/medium/high to re-enable chain-of-thought if a larger token tier is available.
+      - RAG_LLM_REASONING_EFFORT=off
+      # --- Embeddings: AIOps bge-m3 (multilingual, 1024-dim, GPU) ---
+      - RAG_EMBED_BACKEND=openai_compat
+      - RAG_TEI_URL=https://models.example.internal/openai/v1
+      - RAG_EMBED_MODEL=bge-m3
+      - RAG_EMBED_DIM=1024
+      - RAG_EMBED_API_KEY_HEADER=apikey
+      - RAG_RERANK_BACKEND=openai_compat
+      - RAG_RERANK_URL=https://models.example.internal/openai/v1
+      - RAG_RERANK_MODEL=bge-reranker
+      - RAG_RERANK_API_SHAPE=cohere
+      - RAG_RERANK_API_KEY_HEADER=apikey
+      # The "fallback" is the SAME endpoint and model as the primary, so it buys a RETRY on a
+      # transient failure, not redundancy — and, being the same model, it cannot put the abstain
+      # gate on a different score scale the way the old foreign primary could.
+      - RAG_RERANK_FALLBACK_BACKEND=openai_compat
+      - RAG_RERANK_FALLBACK_URL=https://models.example.internal/openai/v1
+      - RAG_RERANK_FALLBACK_MODEL=bge-reranker
+      - RAG_RERANK_FALLBACK_API_SHAPE=cohere
+      - RAG_RERANK_FALLBACK_API_KEY_HEADER=apikey
+      # 0.23, not 0.35: calibrated for THIS model on 40 labelled acme__test questions with a
+      # Youden sweep (docs/calibration.md, 2026-09-11). Measured on that set, 0.35 refuses
+      # answerable questions ("which documents describe a reward scheme" 0.25, "main sections of
+      # the Torch Bearers Policy" 0.34) while catching no additional unanswerable one — every
+      # unanswerable question there scores at most 0.21, bar one that the ANSWER stage refuses.
+      - RAG_ABSTAIN_THRESHOLD=0.23
+      # Finer chunks so a multi-topic doc doesn't dilute a sub-topic below the gate — each clause
+      # becomes its own retrievable unit and reranks high cross-lingually. New/reindexed docs only.
+      - RAG_CHUNK_SIZE=250
+      - RAG_CHUNK_OVERLAP=50
+      - RAG_OCR_BACKEND=chandra
+      - RAG_CHANDRA_URL=https://models.example.internal/openai/v1
+      - RAG_CHANDRA_MODEL=chandra-ocr
+      # apikey, not Authorization: probed live against this endpoint — apikey 200, Authorization 401.
+      - RAG_CHANDRA_API_KEY_HEADER=apikey
+      # text_only: digital pages read via text layer (fast); scanned/textless pages auto-OCR via
+      # Chandra. Set "ocr" to ALSO OCR pages that have text AND an embedded image (captures figures).
+      - RAG_PDF_IMAGE_PAGES=text_only
+      # chandra: the vision gateway reads RAG_CHANDRA_* above, i.e. OUR OWN AIOps host — one
+      # vision model for OCR and for image Q&A instead of two, and no second credential.
+      #
+      # Measured on this deployment against the previous gemma4-31b gateway, same image, same
+      # question. Asked for a customer name and phone number that were NOT in the image, Gemma
+      # answered with the invoice total and due date as though that were the answer; Chandra
+      # said it could not determine them and listed what the image actually contained. A vision
+      # model that will not say "not present" is the one failure this gateway cannot tolerate:
+      # its captions are INDEXED and can then be cited as grounded evidence.
+      - RAG_VISION_LLM_BACKEND=chandra
+      # Kept for a one-line revert to the previous gateway; unread while the backend is chandra.
+      - RAG_VISION_LLM_URL=https://models-uat.example.internal/openai/v1
+      - RAG_VISION_LLM_MODEL=gemma4-31b
+      # apikey, not Authorization: probed against this endpoint — Authorization 401, apikey 200.
+      - RAG_VISION_LLM_API_KEY_HEADER=apikey
+      - RAG_MULTIMODAL_ENABLED=true
+      # Route ALL images (png/jpg/tiff…) through the OCR engine (Chandra), same as scanned PDFs,
+      # instead of a vision-LLM caption. "caption" restores vision-LLM description of images.
+      - RAG_IMAGE_EXTRACT_BACKEND=ocr
+      # Diagram-structure extraction (pragmatic ColPali-style approximation, CPU-only): for an
+      # image doc, ALSO parse the vision model's reading of it into real arrow-direction graph
+      # edges (not just co-occurrence) — see rag_core.graph.parse_diagram_structure.
+      - RAG_DIAGRAM_GRAPH_ENABLED=true
+      # Route "explain/draw the architecture of X" through the typed architecture extractor +
+      # deterministic Mermaid/PlantUML renderer (phase-MAD) — the friend's proper diagram feature,
+      # preferred over the ad-hoc prompt approach. Additive; normal questions are untouched.
+      - RAG_ARCHITECTURE_INTENT_ENABLED=true
+      # Unified KB: fuse structured sources (SQL / NoSQL / REST / SharePoint connected to a KB) into
+      # the grounded Ask answer alongside document spans — each structured source cited on its own.
+      # No-op for a KB with no connector; needs a configured connection (Data & SQL / Connectors).
+      - RAG_UNIFIED_KB_ENABLED=true
+      # Graph bridge (Option B): write a connected source's structured facts INTO the KB knowledge
+      # graph so they share entity nodes with the documents (entity resolution via normalize_entity)
+      # and show in-contact in GraphRAG. Query-time, additive + fail-safe. Needs graphrag + unified.
+      - RAG_GRAPH_BRIDGE_ENABLED=true
+      # Fail-closed PII classification floor: raise a doc's data-classification (or block) when its
+      # detected structured PII (Aadhaar/PAN/card…) implies a higher level than requested. Per-ingest
+      # toggle (Uploader "Auto-classify PII"); default policy = raise; blocks above the ingestor's clearance.
+      - RAG_PII_CLASSIFICATION_ENABLED=true
+      # Semantic intent routing: understand a question's INTENT (catalog / summarize / rag) before
+      # retrieval so "list the documents/artifacts" returns the KB inventory and "recap this chat"
+      # summarizes the thread, instead of an out-of-scope abstain. Additive; default OFF in code.
+      - RAG_INTENT_ROUTING_ENABLED=true
+      - RAG_INTENT_BACKEND=llm
+      # Coverage-aware generation: after a grounded answer, if a clearly-relevant retrieved point
+      # (rerank score >= coverage_min_score) is absent from the answer, do ONE targeted re-prompt to
+      # fold it back in — accepted only if it improves coverage without regressing faithfulness. The
+      # direct fix for "the model dropped a point that retrieval had" (6->3). One extra LLM call only
+      # when a drop is detected; grounded-or-abstain untouched.
+      - RAG_COVERAGE_CHECK_ENABLED=true
+      # Continuous 24/7 model-health self-check: a background loop probes the platform model
+      # backends every RAG_HEALTH_POLL_SECONDS and publishes a snapshot the console reads without
+      # clicking "Re-check". Only the Redis leader replica probes; a backend flips offline only after
+      # RAG_HEALTH_POLL_FAIL_THRESHOLD consecutive failures (no flap on a single blip). refresh=true
+      # still force-probes. Default OFF in code; ON here.
+      - RAG_HEALTH_POLL_ENABLED=true
+      - RAG_HEALTH_POLL_SECONDS=60
+      # --- Federation (Federated RAG) ---
+      - RAG_FEDERATION_ENABLED=true
+      # --- Faithfulness: multilingual NLI (mDeBERTa), supportedness = 1 - P(contradiction) ---
+      - RAG_FAITHFULNESS_BACKEND=nli
+      - RAG_NLI_URL=http://nli-checker:80
+      - RAG_NLI_MODEL=MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7
+      - RAG_FAITHFUL_THRESHOLD=0.4
+      - RAG_FLAG_THRESHOLD=0.15
+      # --- GraphRAG: translate-then-extract for Indic entities ---
+      - RAG_GRAPHRAG_ENABLED=true
+      - RAG_GRAPH_EXTRACT_BACKEND=translate
+      # Dedicated Sarvam Translate model — the reasoning chat model echoes Indic text back or
+      # returns null, so it can't drive translate-then-extract. Inherits the Sarvam subscription.
+      - RAG_TRANSLATE_BACKEND=llm
+      - RAG_GRAPH_SUMMARY_BACKEND=llm
+      # Egress allowlist: internal stores + the model API hosts. api.jina.ai was REMOVED 2026-09-11 (foreign host)
+      # (eval reranker) — remove it for a fully sovereign deployment.
+      - RAG_ALLOWED_EGRESS_HOSTS=localhost,qdrant,opensearch,minio,postgres,api.sarvam.ai,models.example.internal,models-dev.example.internal,nli-checker,192.0.2.13,models-uat.example.internal,azurite

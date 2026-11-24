@@ -1,0 +1,4 @@
+# Prometheus textfile drop dir. The RAGAS governance gate writes ragas.prom here
+# (make ragas ARGS="--prometheus infra/observability/textfile/ragas.prom"); the
+# node-exporter service (docker-compose.dev.yml) mounts this dir read-only and
+# Prometheus scrapes the metrics from it. See docs/qa/OBSERVABILITY.md.

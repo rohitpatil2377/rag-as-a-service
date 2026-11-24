@@ -1,0 +1,118 @@
+{
+  "__comment": "RAGAS governance gate (FR-G9). Surfaces the published quality CONTRACT the RaaS governs itself by: the fleet verdict, per-KB PASS/FAIL, and per-KB sovereign RAGAS metric aggregates. Fed by scripts/ragas_gate.py --prometheus (node-exporter textfile → Prometheus job 'ragas-textfile'). Colours follow the Acme Brand book §20 data-viz palette (Saffron→Emerald→Navy→Teal→Gold). Emerald = pass, Saffron = fail/attention; Teal reserved for AI/predicted series only. Metrics appear only after the gate has run at least once (see docs/qa/OBSERVABILITY.md).",
+  "title": "RAGAS Governance — Quality Contract",
+  "uid": "ragas-governance",
+  "tags": ["ragaas", "acme", "ragas", "quality"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Fleet verdict (RAGAS contract)",
+      "description": "1 = every knowledge base clears every quality floor over a sufficient sample with zero grounded-but-uncited answers; 0 = at least one KB failed or the fleet is inconclusive. The single number the quality claim rests on.",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "max(rag_ragas_fleet_status)", "legendFormat": "fleet" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [
+            { "type": "value", "options": { "1": { "text": "PASS", "color": "#0F7B3E" }, "0": { "text": "NOT PASS", "color": "#E87722" } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "#E87722", "value": null }, { "color": "#0F7B3E", "value": 1 }] },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "textMode": "value" }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "KBs passing the contract",
+      "description": "Count of knowledge bases currently clearing every floor (rag_ragas_gate_pass == 1). Compare against the per-KB table to the right to see which KBs are red.",
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum(rag_ragas_gate_pass)", "legendFormat": "passing KBs" }],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "#1A2B4A" } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Questions scored (fleet)",
+      "description": "Total RAGAS-scored questions across all KBs in the last gate run (sum of rag_ragas_sample). Governance certifies a KB only above the min-sample floor — a low number here means the golden sets are too small to certify, not that quality is bad.",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum(rag_ragas_sample)", "legendFormat": "scored" }],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "#C79A3A" } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Per-KB verdict (RAGAS gate)",
+      "description": "Each knowledge base's latest verdict against the contract. Value 1 = PASS, 0 = FAIL/INCONCLUSIVE; the 'status' label carries the exact verdict (pass / fail / inconclusive). Sourced from rag_ragas_gate_pass.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "rag_ragas_gate_pass", "legendFormat": "", "format": "table", "instant": true }],
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "job": true, "instance": true, "__name__": true }, "renameByName": { "kb": "Knowledge base", "status": "Verdict", "Value": "Pass (1/0)" } } }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Pass (1/0)" }, "properties": [{ "id": "custom.cellOptions", "value": { "type": "color-background" } }, { "id": "mappings", "value": [{ "type": "value", "options": { "1": { "text": "PASS", "color": "#0F7B3E" }, "0": { "text": "FAIL", "color": "#E87722" } } }] }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "#E87722", "value": null }, { "color": "#0F7B3E", "value": 1 }] } }] }
+        ]
+      }
+    },
+    {
+      "id": 5,
+      "type": "bargauge",
+      "title": "Per-KB RAGAS metrics (latest run)",
+      "description": "Each KB's sovereign RAGAS aggregate per metric (faithfulness / answer_relevancy / context_precision / context_recall), judged on the platform's own in-boundary models. Contract floors: faithfulness ≥ 0.80, the rest ≥ 0.70. Sourced from rag_ragas_metric.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "rag_ragas_metric", "legendFormat": "{{kb}} · {{metric}}", "instant": true }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "#E87722", "value": null }, { "color": "#C79A3A", "value": 0.7 }, { "color": "#0F7B3E", "value": 0.8 }] }
+        },
+        "overrides": []
+      },
+      "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Faithfulness over time (per KB)",
+      "description": "The grounded-or-abstain core metric — how supported each KB's answers are by their cited evidence — tracked across gate runs. The 0.80 floor is the contract's highest bar; a series dipping below it is a governance breach. Sourced from rag_ragas_metric{metric=\"faithfulness\"}.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "rag_ragas_metric{metric=\"faithfulness\"}", "legendFormat": "{{kb}}" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "custom": { "lineWidth": 2, "fillOpacity": 8 },
+          "color": { "mode": "fixed", "fixedColor": "#1A2B4A" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "#E87722", "value": null }, { "color": "#0F7B3E", "value": 0.8 }] }
+        },
+        "overrides": [
+          { "matcher": { "id": "byFrameRefID", "options": "A" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#0F7B3E" } }] }
+        ]
+      }
+    }
+  ]
+}

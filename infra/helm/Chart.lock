@@ -1,0 +1,6 @@
+dependencies:
+- name: sovereign-node
+  repository: file://sovereign-node
+  version: 0.0.0
+digest: sha256:a2100ebd3e8d57b78da28426a282ee4ec74c6dc38a8df7797188439f52a6f261
+generated: "2026-08-06T10:03:40.948363314-04:00"

@@ -1,0 +1,177 @@
+# RAG as a Service — uv workspace root.
+# Sovereign, multi-tenant Agentic RAG-as-a-Service platform (Acme).
+# Phase-0 is built as a MODULAR MONOLITH (see docs/adr/0001-monolith-first.md);
+# package boundaries mirror the TDD's 8-layer microservice target so the split
+# is a deployment change, not a rewrite.
+
+[project]
+name = "ragaas"
+version = "0.0.0"
+description = "Acme RAG as a Service — sovereign, multi-tenant Agentic RAG-as-a-Service (Phase-0 core)."
+requires-python = ">=3.11"
+readme = "README.md"
+# Root is a meta-package; runtime deps live in the member packages under libs/ and apps/.
+dependencies = [
+    "rag-common",
+    "rag-schemas",
+    "rag-core",
+    "rag-clients",
+]
+
+[dependency-groups]
+# Dev/test/lint toolchain shared across the whole workspace.
+dev = [
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+    "httpx>=0.27",
+    "types-requests",
+    # Stubs for the Phase-11 gold-set loader's YAML parse. Real stubs rather than an
+    # `ignore_missing_imports` override: the loader reads an operator-edited file, and
+    # `yaml.safe_load` returning `Any` unchecked is exactly where a gold-set typo would slip past
+    # the parser into a silently smaller suite.
+    "types-PyYAML",
+]
+
+[tool.uv.workspace]
+members = ["libs/*", "services/*", "apps/api", "apps/demo-cli", "apps/mcp", "sdks/python"]
+
+[tool.uv.sources]
+rag-common = { workspace = true }
+rag-schemas = { workspace = true }
+rag-core = { workspace = true }
+rag-clients = { workspace = true }
+rag-svc-ingestion = { workspace = true }
+rag-svc-doc-intelligence = { workspace = true }
+rag-svc-indexing = { workspace = true }
+rag-svc-retrieval = { workspace = true }
+rag-svc-generation = { workspace = true }
+rag-svc-guardrails-eval = { workspace = true }
+rag-svc-control-plane = { workspace = true }
+rag-api = { workspace = true }
+rag-demo-cli = { workspace = true }
+rag-mcp = { workspace = true }
+
+# ----------------------------------------------------------------------------
+# Lint / format — ruff is the single source of truth.
+# ----------------------------------------------------------------------------
+[tool.ruff]
+# 120 to accommodate descriptive pydantic Field(...) docstrings that carry FR/TDD
+# traceability inline (a deliberate readability trade-off for a long-lived product).
+line-length = 120
+target-version = "py311"
+src = ["libs/*/src", "apps/*/src", "services"]
+# Untracked, experimental non-workspace service — keep the lint gate off external code.
+extend-exclude = ["infra/gliner"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "C4", "SIM", "TID", "PL", "RUF", "ASYNC", "S"]
+ignore = [
+    "PLR0913", # allow >5 args on wiring/factory functions
+    "S101",    # asserts are fine in tests
+]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*.py" = ["S603", "S607"]  # CLI scripts intentionally shell out to docker/alembic on PATH
+# Tests deliberately import inside functions/fixtures to control settings/env ordering.
+"tests/**" = ["S", "PLR2004", "PLC0415"]
+"**/tests/**" = ["S", "PLR2004", "PLC0415"]
+# The demo driver + scripts import app/settings AFTER setting env (12-factor ordering).
+"apps/demo-cli/**" = ["PLC0415"]
+"scripts/**" = ["PLC0415"]
+# conftest defers heavy imports (factory/wiring) out of collection time by design.
+"conftest.py" = ["PLC0415"]
+# Postgres adapters interpolate ONLY the schema name, which is validated by
+# rag_common.tenancy.pg_schema (strict slug). All values are bound parameters.
+# S608 would be a false positive here; isolation correctness is covered by
+# tests/integration/test_tenant_isolation.py.
+"**/graph_store.py" = ["S608"]  # only the pg_schema-validated schema name is interpolated; all values bound
+"**/postgres_catalog.py" = ["S608"]
+"**/postgres_audit.py" = ["S608"]
+"**/hitl.py" = ["S608"]  # same pattern: only the pg_schema-validated schema name is interpolated
+"**/model_connection.py" = ["S608"]  # same pattern: only the pg_schema-validated schema name is interpolated
+"**/sql_connection.py" = ["S608"]  # same pattern: only the pg_schema-validated schema name is interpolated
+"**/conversation.py" = ["S608"]  # same pattern: only the pg_schema-validated schema name is interpolated
+"**/knowledge_base.py" = ["S608"]  # same pattern: only the pg_schema-validated schema name is interpolated
+"**/identity.py" = ["S608"]  # only the fixed _IDENTITY_SCHEMA constant is interpolated; all values are bound params
+"**/org_units.py" = ["S608"]  # only the fixed _IDENTITY_SCHEMA constant is interpolated; values bound
+"**/tenant_control.py" = ["S608"]  # only the fixed _IDENTITY_SCHEMA constant is interpolated; values bound
+"**/api_keys.py" = ["S608"]  # only the fixed rag_identity schema is interpolated; all values are bound params
+"**/auth_tokens.py" = ["S608"]  # only the fixed rag_identity schema is interpolated; all values are bound params
+"**/eval_schedule.py" = ["S608"]  # only the fixed rag_identity schema is interpolated; all values are bound params
+"**/feature_flags.py" = ["S608"]  # only the fixed rag_identity schema is interpolated; all values are bound params
+"**/egress_requests.py" = ["S608"]  # only the fixed rag_identity schema is interpolated; all values are bound params
+"**/ingest_jobs.py" = ["S608"]  # only the fixed rag_identity schema is interpolated; all values are bound params
+"**/sync_jobs.py" = ["S608"]  # only the fixed rag_identity schema is interpolated; all values are bound params
+"**/dual_control.py" = ["S608"]  # only the fixed rag_identity schema is interpolated; all values are bound params
+"**/grants.py" = ["S608"]  # only the fixed rag_identity schema is interpolated; all values are bound params
+# Presentation/deck builders: throwaway tooling, not product code — intentional typography
+# (en/em dash, × sign), long inline HTML/text literals, and big linear build functions.
+"scripts/build_*.py" = ["RUF001", "E501", "PLR0915", "PLR0912", "N806"]
+"scripts/seed_demo_runtime.py" = ["E501"]  # one big inline seed-data literal, not product code
+"scripts/shape_battery.py" = ["S310", "PLR2004", "RUF100"]  # ad-hoc probe: urllib against a local URL + inline thresholds (keeps its existing inline noqa)
+"scripts/ragas_gate.py" = ["PLR0915", "PLR2004", "SIM108", "B023"]  # standalone CI-gate script, not product code
+# Non-product infra artifacts: an operator helper + verbatim source-patch mirrors of product code.
+"infra/registry-operator/registry_operator.py" = ["S105", "S310"]  # TOKEN_PATH is a file path, not a secret; urllib hits the in-cluster API
+"infra/helm/files/source-patches/*.py" = ["PLC0415", "RUF100"]  # verbatim product mirror; cycle-break imports + its own inline noqa kept byte-identical
+
+[tool.ruff.lint.isort]
+known-first-party = ["rag_common", "rag_schemas", "rag_core", "rag_clients"]
+
+# ----------------------------------------------------------------------------
+# Type checking — strict; every service/lib must pass.
+# ----------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+plugins = ["pydantic.mypy"]
+mypy_path = [
+    "libs/common/src",
+    "libs/schemas/src",
+    "libs/rag-core/src",
+    "libs/clients/src",
+]
+
+[[tool.mypy.overrides]]
+# Third-party libs without type stubs (confined to adapter/parse layers).
+module = ["qdrant_client.*", "opensearchpy.*", "minio.*", "pypdf.*", "pdfplumber.*", "defusedxml.*", "pytesseract.*", "pdf2image.*", "PIL.*", "redis.*", "jwt.*", "sqlglot.*", "presidio_analyzer.*", "presidio_anonymizer.*", "paddleocr.*", "cv2.*", "ldap3.*", "azure.*", "rdkit", "rdkit.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# numpy (pulled transitively by qdrant_client) ships 3.12-only stub syntax; we keep
+# our code at 3.11 semantics and simply don't type-check into numpy's stubs.
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
+
+[[tool.mypy.overrides]]
+# rdkit, skipped for the same reason as numpy and one of its own: it is the only OPTIONAL extra
+# in the tree (`rag-clients[chem]`), so whether it is installed decides what mypy can see — and
+# `ignore_missing_imports` alone makes the two views DISAGREE. Absent, `chem_normalize.py`'s
+# import guard type-checks clean; present, the same unchanged file reports four errors against
+# rdkit's own incomplete annotations (`RDLogger.DisableLog` undeclared, an untyped
+# `MolToInchiKey`, and the guard's `Chem = None` fallback assigning to a module-typed name). A
+# gate whose result depends on an optional install is not a gate, and the fix is not to annotate
+# around a third-party toolkit's gaps in our adapter. Skipping its imports makes rdkit `Any` in
+# both states, which is what the import-guarded adapter already treats it as at runtime.
+module = ["rdkit", "rdkit.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
+
+# ----------------------------------------------------------------------------
+# Tests.
+# ----------------------------------------------------------------------------
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests", "libs", "services", "apps", "sdks"]
+python_files = ["test_*.py"]
+markers = [
+    "integration: requires the docker-compose dev stores to be running",
+    "e2e: full walking-skeleton slice",
+    "eval: golden-set release gate (needs the real cross-encoder; see evaluation.py)",
+]
+addopts = "-ra --strict-markers"

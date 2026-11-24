@@ -1,0 +1,303 @@
+{
+  "__comment": "Federated RAG federation observability. Colours follow the Acme Brand book \u00a720 data-viz palette (fixed series order Saffron\u2192Emerald\u2192Navy\u2192Teal\u2192Gold\u2192Solar). METRIC-NAME ASSUMPTION: the panels below query rag_audit_action_total{action=\"...\"}, a counter derived from the AuditAction values grant_issue/grant_revoke/federated_query (see libs/schemas AuditAction). The EXACT metric name must match whatever the app exports via OTel\u2192Prometheus \u2014 this dashboard cannot be verified against a live app here, so if the export uses a different name (e.g. a per-action metric or a different label key than `action`) update the exprs to match. See the 'Metric assumptions' text panel in-dashboard.",
+  "title": "RAG as a Service \u2014 Federated RAG Federation",
+  "uid": "ragaas-federation",
+  "tags": [
+    "ragaas",
+    "acme",
+    "federation"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 2,
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "Metric assumptions",
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "These panels assume the app exports federation audit actions as a Prometheus counter **`rag_audit_action_total{action=\"grant_issue|grant_revoke|federated_query\", src_dept=\"...\"}`** (derived from `AuditAction`). If the OTel\u2192Prometheus export uses a different metric or label name, edit the panel queries to match \u2014 this dashboard was authored without a running app to confirm the exact series.\n\n**Federation health (T1):** `rag_audit_action_total{action=\"federation_denied\"}` (peer refused a query) and `{action=\"federation_alert\"}` (denial-burst anomaly). Federation SLO: **0** anomaly alerts/hour in steady state; investigate any denial-rate spike."
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Federated query rate",
+      "description": "Cross-department federated queries per second (AuditAction.FEDERATED_QUERY).",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(rag_audit_action_total{action=\"federated_query\"}[5m]))",
+          "legendFormat": "federated queries/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#E87722"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Grants issued vs revoked",
+      "description": "Grant lifecycle events (AuditAction.GRANT_ISSUE / GRANT_REVOKE). Emerald = issued, Saffron = revoked.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(rag_audit_action_total{action=\"grant_issue\"}[15m]))",
+          "legendFormat": "issued"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(rag_audit_action_total{action=\"grant_revoke\"}[15m]))",
+          "legendFormat": "revoked"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#0F7B3E"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#E87722"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Active grants (issued \u2212 revoked)",
+      "description": "Net cumulative grants currently authorising cross-dept access. Approximated as total issued minus total revoked over the range; replace with a direct gauge (e.g. rag_active_grants) if the app exposes one.",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 12
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "clamp_min(sum(increase(rag_audit_action_total{action=\"grant_issue\"}[$__range])) - sum(increase(rag_audit_action_total{action=\"grant_revoke\"}[$__range])), 0)",
+          "legendFormat": "active grants"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#1A2B4A"
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Cross-dept queries by source department",
+      "description": "Federated query rate broken down by the requesting (source) department.",
+      "gridPos": {
+        "h": 6,
+        "w": 16,
+        "x": 8,
+        "y": 12
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (src_dept) (rate(rag_audit_action_total{action=\"federated_query\"}[5m]))",
+          "legendFormat": "{{src_dept}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Grant-denied (no-grant skip) rate",
+      "description": "Share of federated-query peer attempts skipped because no active grant authorised the cross-dept read. Assumes a counter rag_federation_grant_denied_total; if the app instead tags skips as a federated_query label (e.g. outcome=\"no_grant\") switch the numerator to that series.",
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 18
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(rag_federation_grant_denied_total[15m])) / clamp_min(sum(rate(rag_federation_grant_denied_total[15m])) + sum(rate(rag_audit_action_total{action=\"federated_query\"}[15m])), 1)",
+          "legendFormat": "grant-denied rate"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#E87722"
+          }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Federation denials (grant refused at use)",
+      "type": "timeseries",
+      "description": "Peers that REFUSED a federated query (grant revoked/invalid at use). A rising line for one source department is a grant-probing signal (T1).",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (src_dept) (rate(rag_audit_action_total{action=\"federation_denied\"}[5m]))",
+          "legendFormat": "{{src_dept}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Federation anomaly alerts (denial burst)",
+      "type": "stat",
+      "description": "FEDERATION_ALERT events: a caller denied by many peers in one query (grant-probing). Non-zero warrants a look. SLO: 0 alerts/hour in steady state.",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(rag_audit_action_total{action=\"federation_alert\"}[1h]))"
+        }
+      ]
+    }
+  ]
+}

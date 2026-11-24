@@ -1,0 +1,54 @@
+{
+  "dxt_version": "0.1",
+  "name": "ragaas",
+  "display_name": "RAG as a Service — Sovereign RAG",
+  "version": "1.0.0",
+  "description": "Agent-callable tools over the RagaaS/RAG as a Service sovereign RAG pipeline: grounded-or-abstain answers with citations, hybrid retrieval, multi-turn conversation, cross-department federated query, and governance (attestation, usage, grants). Every tool inherits the platform's guardrails, tenancy, faithfulness checks, and tamper-evident audit trail.",
+  "author": {
+    "name": "Acme — RAG as a Service"
+  },
+  "license": "proprietary",
+  "server": {
+    "type": "python",
+    "entry_point": "rag-mcp",
+    "mcp_config": {
+      "command": "rag-mcp",
+      "args": [],
+      "env": {
+        "RAG_MCP_TENANT": "${user_config.tenant}",
+        "RAG_MCP_TOKEN": "${user_config.token}"
+      }
+    }
+  },
+  "user_config": {
+    "tenant": {
+      "type": "string",
+      "title": "Organisation / tenant id",
+      "description": "The tenant this stdio server instance acts for. The server is bound to exactly this tenant at launch and never accepts a client-supplied tenant.",
+      "required": true
+    },
+    "token": {
+      "type": "string",
+      "title": "Platform JWT or service-account API key",
+      "description": "Validated against the tenant above. Mint a dev token with scripts/mcp-connect.sh, or use a service-account key (ek_…) in production.",
+      "sensitive": true,
+      "required": true
+    }
+  },
+  "tools": [
+    { "name": "rag.list_kbs", "description": "List the knowledge bases the caller's organisation owns." },
+    { "name": "rag.list_documents", "description": "List the documents in a knowledge base (id, type, tags)." },
+    { "name": "rag.retrieve", "description": "Hybrid retrieval → ranked cited spans (no generation)." },
+    { "name": "rag.query", "description": "Grounded-or-abstain answer with citations for a question." },
+    { "name": "rag.conversation", "description": "Multi-turn ask that keeps context via a conversation_id." },
+    { "name": "rag.ingest", "description": "Ingest a plain-text document (requires the ingestor role)." },
+    { "name": "rag.federated_query", "description": "Federated RAG cross-department answer over own KBs + grant-authorised peers." },
+    { "name": "rag.attestation", "description": "Sovereignty & data-protection attestation report for a knowledge base." },
+    { "name": "rag.usage", "description": "Usage metering + indicative showback over a time window." },
+    { "name": "rag.list_grants", "description": "List Federated RAG federation grants issued/received (needs federation)." }
+  ],
+  "keywords": ["rag", "sovereign", "mcp", "retrieval", "india", "federation", "governance"],
+  "compatibility": {
+    "note": "stdio mode co-locates with the platform (it drives the pipeline in-process, so it needs the platform's stores/models reachable). For a remote deployment, connect over HTTP to /mcp instead — see plugin/README.md."
+  }
+}

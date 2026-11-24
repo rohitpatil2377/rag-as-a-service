@@ -1,0 +1,11 @@
+{
+  "name": "ragaas-widget",
+  "version": "0.1.0",
+  "description": "RAG as a Service — embeddable, white-label chat widget (FR-I6). Dependency-free.",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "license": "UNLICENSED"
+}

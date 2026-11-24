@@ -1,0 +1,563 @@
+# RAG as a Service — local development stack (sovereign stores + models + observability).
+# NOT a production topology (see infra/helm for k8s). All images run locally; nothing
+# calls a foreign/managed service AT RUNTIME. `make up` builds + starts this; `make demo`
+# drives it.
+#
+# DEV BOOTSTRAP ONLY (documented, one-time): on first run, the `tei` service downloads
+# the BAAI/bge-small-en-v1.5 model weights from huggingface.co, then caches them in the
+# `tei-cache` volume — every subsequent start is fully offline. This is a one-time local
+# build/setup action, NOT a runtime inference call, and does not affect the sovereignty
+# egress guard (rag_common.sovereignty.assert_sovereign), which still blocks the running
+# API from calling any non-allowlisted host. Production MUST point `HF_ENDPOINT` at an
+# internal model mirror (TDD NFR "Sovereignty" — internal HF/NGC/OS mirrors) instead
+# of huggingface.co; see the `tei` service below.
+#
+# LLM: default backend is `extractive_dev` (zero-GPU). To use a real self-hosted LLM,
+# run the `gpu` profile (vLLM) and set RAG_LLM_BACKEND=vllm.
+name: ragaas-dev
+
+services:
+  # --- Memory sizing (this dev VM: 23 GB RAM, NO swap) ---
+  # An OOM spike KILLS a container outright (no swap), so every heavy container has an
+  # explicit mem_limit; peak stays well under ~18 GB, leaving ~5 GB free. Sum of limits
+  # ~= 13.5 GB. DEV PROFILE ONLY — prod sizing lives in infra/helm, untouched.
+  # The federation/NLI/multimodal services below are OFF by default; if you start
+  # nli-checker (1g) + tei-vision (2g) the base sum grows by ~3g to ~16.5 GB — still within
+  # the ~18 GB peak target on this VM. sovereign-node (256m) is a commented stub for now.
+  qdrant:                                   # Vector DB (FR-C4)
+    # Pinned to match the qdrant-client version in libs/clients exactly (client warns on
+    # major/minor skew > 1); verified working together 2026-07-02. Bump both in lockstep.
+    # CAUTION: Qdrant's on-disk segment format is not guaranteed cross-version-compatible
+    # (confirmed: a v1.12 volume failed to load under v1.18 — "unknown variant `on_disk`").
+    # When bumping this tag, wipe the qdrant-data volume (`docker volume rm
+    # ragaas-dev_qdrant-data`) or follow Qdrant's official migration path — never
+    # assume in-place upgrade works.
+    image: qdrant/qdrant:v1.18.0
+    restart: unless-stopped
+    ports: ["${RAG_INFRA_BIND:-0.0.0.0}:6333:6333"]
+    volumes: ["qdrant-data:/qdrant/storage"]
+    mem_limit: 2g
+    mem_reservation: 512m
+
+  opensearch:                               # Sparse/BM25 (FR-C5)
+    image: opensearchproject/opensearch:2.17.1
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true        # dev only; prod uses TLS + auth
+      # Heap capped explicitly — OpenSearch is the most likely thing to balloon. Keep the
+      # container mem_limit above heap to leave room for off-heap/Lucene mmap.
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx1g
+    ports: ["${RAG_INFRA_BIND:-0.0.0.0}:9200:9200"]
+    volumes: ["opensearch-data:/usr/share/opensearch/data"]
+    mem_limit: 2g
+    mem_reservation: 1g
+
+  minio:                                    # S3-compatible object store (FR-A2/G4)
+    # THE SERVICE NAME IS STILL `minio` ON PURPOSE. It is the hostname in RAG_MINIO_ENDPOINT, in
+    # RAG_ALLOWED_EGRESS_HOSTS, in scripts/wait_for_stores.py and in the integration-test env, so
+    # renaming it would ripple through all of them for no behavioural gain. The ADAPTER is also
+    # still `MinioObjectStore` and still correct: it talks S3 through the `minio` Python client,
+    # which is a client library, not a server dependency.
+    #
+    # WHY NOT THE MINIO SERVER IMAGE: MinIO withdrew their public container images — the Docker
+    # Hub repository is gone ("object not found") and quay.io/minio/minio answers 401 to an
+    # anonymous pull. A pinned tag that cannot be pulled makes `make up` fail on a fresh clone,
+    # so the dev stack serves S3 from SeaweedFS (Apache-2.0) instead. Same wire protocol, same
+    # credentials, same bucket layout; `s3.json` grants the one dev identity below.
+    #
+    # NOT a drop-in for production: review infra/helm before assuming this choice there.
+    image: chrislusf/seaweedfs:latest
+    restart: unless-stopped
+    command: >
+      server -dir=/data -s3 -s3.port=9000 -s3.config=/etc/seaweedfs/s3.json
+      -master.volumeSizeLimitMB=1024 -volume.max=0 -ip=minio
+    ports: ["${RAG_INFRA_BIND:-0.0.0.0}:9000:9000"]
+    volumes:
+      - "minio-data:/data"
+      - "./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro"
+    mem_limit: 1g
+    mem_reservation: 256m
+
+  azurite:                                  # Azure Blob emulator — exercises the A2b Azure connector
+    # A TEST FIXTURE, not part of any deployment: it exists so the Azure folder-sync path can be
+    # proven against a real Azure wire protocol without an Azure account or foreign egress.
+    # Addressed by SERVICE NAME (azurite:10000/devstoreaccount1) — inside a container 127.0.0.1
+    # means that container, so a host-loopback address can never reach this.
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    command: azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --location /data
+    ports: ["${RAG_INFRA_BIND:-0.0.0.0}:10000:10000"]
+    volumes: ["azurite-data:/data"]
+    restart: unless-stopped
+    mem_limit: 512m
+    mem_reservation: 128m
+
+  postgres:                                 # Metadata/lineage/workflow + audit (FR-G7/G4)
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=rag
+      - POSTGRES_PASSWORD=rag              # dev only
+      - POSTGRES_DB=rag
+    ports: ["${RAG_INFRA_BIND:-0.0.0.0}:5432:5432"]
+    volumes: ["pg-data:/var/lib/postgresql/data"]
+    mem_limit: 1g
+    mem_reservation: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  tei:                                      # Self-hosted embeddings (FR-C3) — CPU, small OSS model
+    # cpu-1.5 has a known artifact-download bug ("relative URL without a base") against
+    # the current HF repo layout for this model; cpu-latest is confirmed working (verified
+    # 2026-07-02). Re-pin to a specific verified tag when Acme cuts an internal mirror image.
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    command: ["--model-id", "BAAI/bge-small-en-v1.5"]
+    # TODO(Phase-1 sovereignty): set HF_ENDPOINT to an internal model mirror and
+    # drop the public huggingface.co dependency entirely (see file header note).
+    ports: ["${RAG_INFRA_BIND:-0.0.0.0}:8080:80"]
+    volumes: ["tei-cache:/data"]
+    mem_limit: 2g
+    mem_reservation: 512m
+
+  reranker:                                 # Cross-encoder reranker (FR-D2) — CPU, runs everywhere
+    # The reranker sets FINAL order and the confidence the abstain gate reads, so it is NOT
+    # prod-only. MiniLM-L-6 (22M, Apache-2.0) is the CPU tier purely on latency: measured on a
+    # 16-core box at ~900-char chunks, bge-reranker-base (278M) takes ~12.8 s for 25 candidates
+    # and MiniLM ~2.1 s; at the default pool of 50 that is ~26 s vs ~5.2 s. MiniLM is ENGLISH
+    # ONLY — for Hindi/Indic use the GPU tier below.
+    # --max-client-batch-size must cover RAG_RERANK_CANDIDATES or TEI 422s the request; the
+    # client also batches, so this is belt-and-braces.
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    command: ["--model-id", "cross-encoder/ms-marco-MiniLM-L-6-v2", "--max-client-batch-size", "64"]
+    ports: ["${RAG_INFRA_BIND:-0.0.0.0}:8083:80"]
+    volumes: ["reranker-cache:/data"]
+    mem_limit: 2g
+    mem_reservation: 512m
+
+  nli-checker:                              # NLI faithfulness backend (FR-E4) — CPU, sovereign
+    # Serves the NLI cross-encoder that the grounding gate uses when
+    # RAG_FAITHFULNESS_BACKEND=nli: it scores whether each answer sentence is ENTAILED by
+    # the retrieved spans (entailment/neutral/contradiction), a stronger signal than the
+    # lexical checker for the grounded-or-abstain decision. Runs entirely on CPU on this VM,
+    # calls no foreign host at runtime (same sovereignty guarantee as tei/reranker).
+    # DEV BOOTSTRAP ONLY: the model is pulled once from huggingface.co on first start, then
+    # cached in `nli-cache` — every subsequent start is fully offline (same one-time rule as
+    # `tei`; the runtime egress guard is never loosened; prod points HF_ENDPOINT at an
+    # internal mirror). OFF by default — the api env flags above stay commented.
+    # OPT-IN: the api env flags for it are commented out below, so starting it by default just
+    # burned ~1.5 GB and a one-time model pull for a backend nothing was pointed at. Enable with
+    #   docker compose --profile nli up -d nli-checker
+    # and set RAG_FAITHFULNESS_BACKEND=nli + RAG_NLI_URL=http://nli-checker:80 on the api.
+    profiles: ["nli"]
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    command: ["--model-id", "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7"]
+    ports: ["${RAG_INFRA_BIND:-0.0.0.0}:8085:80"]
+    volumes: ["nli-cache:/data"]
+    mem_limit: 8g
+    mem_reservation: 256m
+
+  tei-vision:                               # CLIP cross-modal image embedder — DISABLED (opt-in)
+    # DISABLED / opt-in: NOT part of the default `up` (profile "vision-clip"). True cross-modal
+    # CLIP recall — retrieving an image by VISUAL similarity, not just its caption — needs a real
+    # CLIP model, and there is NO CLIP model in the sanctioned roster: bge-m3 is text-only, and
+    # Chandra is a vision *LLM*/OCR, not a shared-space embedder. Two facts confirmed by testing
+    # (2026-08): (1) TEI serves TEXT architectures ONLY and cannot run any CLIP model; (2) the
+    # previously-configured `nomic-embed-vision-v1.5` ships NO tokenizer, so it never loads on any
+    # server. The multimodal capability the app actually SHIPS is caption-at-ingest via Chandra/
+    # Datalab (RAG_MULTIMODAL_ENABLED=true + RAG_VISION_LLM_BACKEND=chandra_api) — already on,
+    # needs no service here. To enable real visual recall LATER: add a CLIP model to AIOps and
+    # point an openai_compat vision-embed backend at it (preferred, sovereign) — OR, for local
+    # experimentation only, opt into this profile: the image/command below (Infinity + jina-clip-v1,
+    # torch/CPU) is VERIFIED working on this GPU-less VM. Keep the api vision_embed_backend=local
+    # (the default) until a sanctioned model exists; jina-clip-v1 here is NOT roster-approved.
+    profiles: ["vision-clip"]               # opt-in only — never part of the default `up`
+    image: michaelf34/infinity:latest-cpu
+    command: ["v2", "--model-id", "jinaai/jina-clip-v1", "--engine", "torch", "--device", "cpu", "--port", "80"]
+    ports: ["${RAG_INFRA_BIND:-0.0.0.0}:8086:80"]
+    volumes: ["tei-vision-cache:/app/.cache"]
+    mem_limit: 6g
+    mem_reservation: 1g
+
+  # chandra:                                # Chandra (Datalab) VLM — OCR + vision gateway, ONE model
+    # The single vision model for BOTH RAG_OCR_BACKEND=chandra AND vision_llm_backend=chandra:
+    # strong document OCR (tables/forms/handwriting/reading-order, Indic) and open image Q&A.
+    # Served over the OpenAI-compatible vision chat API. GPU-class — commented + profiled so the
+    # base CPU stack is unaffected; enable on the GPU tier or point chandra_url at a hosted API.
+    # profiles: ["gpu"]
+    # image: vllm/vllm-openai:latest
+    # command: ["--model", "datalab-to/chandra", "--trust-remote-code"]
+    # ports: ["${RAG_INFRA_BIND:-0.0.0.0}:8087:8000"]
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{ driver: nvidia, count: 1, capabilities: ["gpu"] }]
+
+  # sovereign-node:                         # Per-department P2P federation node (Federated RAG)
+  #   # DOCUMENTED STUB — intentionally commented out so the base dev stack is unaffected and
+  #   # so `docker compose ... config` needs no build context that does not exist yet.
+  #   # TODO(federation): this needs `sovereign-node/Dockerfile` (a multi-stage golang build of
+  #   # the libp2p node in ../../sovereign-node) which is tracked separately — that Dockerfile
+  #   # is NOT part of this infra change. Once it lands, uncomment this block (and the
+  #   # RAG_FEDERATION_ENABLED api flag above) to bring one dept node up alongside the api.
+  #   # The Go binary is flag-driven (--dept/--rag-url/--listen/--bootstrap); the env vars
+  #   # below are the intended container wiring and map onto those flags in the entrypoint.
+  #   profiles: ["federation"]              # opt-in only, never part of the default `make up`
+  #   build:
+  #     context: ../../sovereign-node       # multi-stage golang build (Dockerfile: follow-up)
+  #   environment:
+  #     - SOVEREIGN_DEPT=hr                  # this node's department id (→ --dept)
+  #     - SOVEREIGN_RAG_URL=http://api:8000 # local dept rag-api this node fronts (→ --rag-url)
+  #     # - SOVEREIGN_BOOTSTRAP=              # comma-sep peer multiaddrs (→ --bootstrap), optional
+  #   ports: ["${RAG_INFRA_BIND:-0.0.0.0}:4001:4001"]  # libp2p listen port
+  #   mem_limit: 256m
+  #   mem_reservation: 64m
+  #   depends_on:
+  #     api: { condition: service_started }
+
+  reranker-gpu:                             # Cross-encoder reranker — GPU, prod tier, opt-in
+    # BGE-reranker-v2-m3 (MIT): MULTILINGUAL (incl. Hindi/Indic), pairs with the bge-m3 embedder
+    # in tei-gpu. 568M params — roughly 2x bge-reranker-base, so ~50 s/query at pool=50 on CPU.
+    # It needs a GPU; provision it together with tei-gpu, not separately.
+    # Point the api at it with BOTH RAG_RERANK_URL=http://reranker-gpu:80 AND
+    # RAG_RERANK_MODEL=BAAI/bge-reranker-v2-m3 — the API refuses a model it was not told to
+    # expect, because RAG_ABSTAIN_THRESHOLD is only meaningful against a named model and this
+    # one's score distribution is not MiniLM's. Re-calibrate the threshold when you switch.
+    image: ghcr.io/huggingface/text-embeddings-inference:latest   # GPU image (CUDA)
+    profiles: ["gpu"]
+    command: ["--model-id", "BAAI/bge-reranker-v2-m3", "--max-client-batch-size", "64"]
+    ports: ["${RAG_INFRA_BIND:-0.0.0.0}:8084:80"]
+    volumes: ["reranker-gpu-cache:/data"]
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: 1, capabilities: ["gpu"] }]
+
+  vllm:                                     # Self-hosted LLM (FR-E1) — GPU, opt-in
+    image: vllm/vllm-openai:latest
+    profiles: ["gpu"]
+    command: ["--model", "Qwen/Qwen2.5-7B-Instruct"]
+    ports: ["8000:8000"]
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: 1, capabilities: ["gpu"] }]
+
+  tei-gpu:                                  # Self-hosted embeddings (FR-C3) — GPU, prod tier, opt-in
+    # BGE-M3 (MIT): 1024-dim, MULTILINGUAL (incl. Hindi/Indic) — the production embedder.
+    # Retrieval quality is bounded by THIS model, not the LLM. GPU is what makes TB-scale
+    # ingestion tractable (thousands of chunks/sec vs hundreds on CPU). Point the api at it
+    # with RAG_TEI_URL=http://tei-gpu:80 + RAG_EMBED_MODEL=BAAI/bge-m3 + RAG_EMBED_DIM=1024
+    # (see infra .env.prod.example). Switching embedder ⇒ full re-index (dim 384→1024).
+    image: ghcr.io/huggingface/text-embeddings-inference:latest   # GPU image (CUDA)
+    profiles: ["gpu"]
+    command: ["--model-id", "BAAI/bge-m3"]
+    ports: ["${RAG_INFRA_BIND:-0.0.0.0}:8082:80"]
+    volumes: ["tei-gpu-cache:/data"]
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: 1, capabilities: ["gpu"] }]
+
+  llama:                                    # Self-hosted LLM (FR-E1) — CPU dev tier
+    # OpenAI-compatible server (same wire API as vLLM), so rag_clients.OpenAICompatGateway
+    # serves both. Real sovereign generation with NO GPU. Model: Qwen2.5-3B-Instruct
+    # (Apache-2.0). DEV BOOTSTRAP ONLY: the GGUF is pulled once from huggingface.co via
+    # `-hf` and cached in llama-cache — same one-time rule as the TEI bge-small pull;
+    # runtime egress guard unchanged; prod points at an internal HF/model mirror.
+    # OPT-IN (`--profile llm`): the default generation backend is `extractive_dev`, which needs
+    # no model at all, so this server would otherwise pull ~2 GB and hold ~3 GB for nothing.
+    profiles: ["llm"]
+    image: ghcr.io/ggml-org/llama.cpp:server
+    # Qwen2.5-3B-Instruct (Apache-2.0). Fall back to :1.5B if 3B breaches the RAM headroom
+    # target or is too slow on CPU (see ADR-0006 / README memory note). Never 7B+ on CPU.
+    # -c = context window (tokens). 4096 was tight for the heavy path (10 chunks + a long answer
+    # can approach the limit → truncation). 8192 gives headroom; Qwen2.5 supports up to 32768.
+    # (Larger context ⇒ more KV-cache RAM.) The AIOps 32B default sets its own window server-side.
+    command: ["-hf", "Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M", "--host", "0.0.0.0", "--port", "8080", "-c", "8192"]
+    ports: ["${RAG_INFRA_BIND:-0.0.0.0}:8081:8080"]
+    volumes: ["llama-cache:/root/.cache/llama.cpp"]
+    mem_limit: 4g
+    mem_reservation: 2g
+
+  otel-collector:                           # OpenTelemetry (FR-H5)
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes: ["../otel/collector.yaml:/etc/otel/config.yaml:ro"]
+    ports: ["${RAG_INFRA_BIND:-0.0.0.0}:4317:4317"]
+    mem_limit: 512m
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    volumes: ["../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    ports: ["${RAG_INFRA_BIND:-0.0.0.0}:9090:9090"]
+    mem_limit: 512m
+
+  node-exporter:                            # Prometheus textfile bridge for the RAGAS gate (FR-G9/H5)
+    # Sovereign, standard prom/* image (same family as prom/prometheus above — no foreign
+    # dependency). Its ONLY job here is the textfile collector: the RAGAS governance gate
+    # (scripts/ragas_gate.py --prometheus ...) writes a *.prom file into the shared
+    # infra/observability/textfile dir on the host; node-exporter mounts that dir read-only
+    # and re-exposes those metrics at :9100/metrics, which Prometheus scrapes (see
+    # infra/prometheus/prometheus.yml job "ragas-textfile"). This is how the governing quality
+    # numbers (rag_ragas_*) land on the Grafana quality dashboard. See docs/qa/OBSERVABILITY.md.
+    image: prom/node-exporter:v1.8.2
+    command:
+      - "--collector.textfile.directory=/textfile"
+      # Trim to just the collectors we need — this box only serves the RAGAS textfile.
+      - "--collector.disable-defaults"
+      - "--collector.textfile"
+    volumes:
+      - "../observability/textfile:/textfile:ro"
+    ports: ["${RAG_INFRA_BIND:-0.0.0.0}:9100:9100"]
+    mem_limit: 128m
+    mem_reservation: 32m
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin    # dev only
+      - GF_USERS_DEFAULT_THEME=light        # brand: light-dominant
+    volumes:
+      - "../grafana/provisioning:/etc/grafana/provisioning:ro"
+      - "../grafana/dashboards:/var/lib/grafana/dashboards:ro"
+    ports: ["${RAG_INFRA_BIND:-0.0.0.0}:3000:3000"]
+    depends_on: [prometheus]
+    mem_limit: 512m
+
+  api:                                      # RAG as a Service modular monolith
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    environment:
+      - RAG_ENV=dev
+      - RAG_QDRANT_URL=http://qdrant:6333
+      - RAG_OPENSEARCH_URL=http://opensearch:9200
+      - RAG_MINIO_ENDPOINT=minio:9000
+      - RAG_POSTGRES_DSN=postgresql+psycopg://rag:rag@postgres:5432/rag
+      - RAG_TEI_URL=http://tei:80
+      # Declare the embedder this stack ACTUALLY serves. The code defaults are bge-m3/1024
+      # (what the hosted deploy profile uses), while the `tei` service above serves
+      # bge-small-en-v1.5, which is 384-dim. Leaving the default in place creates every Qdrant
+      # collection at 1024 and then fails the first upsert with
+      #   Vector dimension error: expected dim: 1024, got 384
+      # i.e. exactly the mismatch the README warns about, just in the opposite direction.
+      - RAG_EMBED_BACKEND=tei
+      - RAG_EMBED_MODEL=BAAI/bge-small-en-v1.5
+      - RAG_EMBED_DIM=384
+      # URL *and* model: the abstain threshold is calibrated against a named cross-encoder, so
+      # the API verifies the reranker is actually serving this one and refuses if it is not.
+      # Switching to the GPU tier means changing BOTH lines together.
+      - RAG_RERANK_URL=http://reranker:80
+      - RAG_RERANK_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
+      # Platform-default generation: `extractive_dev`, which needs NO model and NO GPU. It
+      # stitches the answer out of the retrieved spans, so the full pipeline — retrieval,
+      # citations, the grounded-or-abstain gate — is exercised end to end on any laptop, with
+      # nothing to download. It is deterministic, which is also why CI uses it.
+      #
+      # For REAL local generation, start the bundled llama.cpp server and point at it:
+      #   docker compose --profile llm up -d llama
+      #   RAG_LLM_BACKEND=openai_compat  RAG_VLLM_URL=http://llama:8080/v1
+      #   RAG_LLM_MODEL=Qwen2.5-3B-Instruct
+      # First start pulls a ~2 GB GGUF into the `llama-cache` volume; after that it is offline.
+      # For a hosted OpenAI-compatible endpoint instead, see docker-compose.deploy.example.yml —
+      # the host must also be added to RAG_ALLOWED_EGRESS_HOSTS below or the guard refuses it.
+      - RAG_LLM_BACKEND=extractive_dev
+      - RAG_VLLM_URL=http://llama:8080/v1
+      - RAG_LLM_MODEL=Qwen2.5-3B-Instruct
+      - RAG_LLM_API_KEY=${RAG_LLM_API_KEY:-}
+      - RAG_OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      # P2 agentic features (code default OFF; exercised end-to-end in the dev stack).
+      - RAG_SEMANTIC_CACHE_ENABLED=true
+      - RAG_AGENTIC_RETRY_ENABLED=true
+      # GraphRAG (FR-C6/D4) — heuristic extraction (CPU-free) + local graph retrieval.
+      - RAG_GRAPHRAG_ENABLED=true
+      # Continuous evaluation (FR-G9) — in-process scheduler; short tick for the dev tier.
+      - RAG_CONTINUOUS_EVAL_ENABLED=true
+      - RAG_CONTINUOUS_EVAL_TICK_MINUTES=1
+      # Scheduled delta connector sync (FR-A8) — rides the same scheduler loop.
+      - RAG_SYNC_SCHEDULER_ENABLED=true
+      # Suggested follow-up questions (FR-I8) — grounded in retrieved context only.
+      # 'llm' lets the KB's model write natural, varied questions from the retrieved context +
+      # the user's question, instead of the deterministic "What does the document say about X?"
+      # template (the heuristic fallback — used not just when the model call raises, but also
+      # when it returns EMPTY content, which a reasoning model like sarvam-105b does under a
+      # too-small token cap: it spends the budget on <think> and never reaches the answer. The
+      # platform default (1024) starves it silently — confirmed via the gateway's own
+      # model_returned_null_content warning, with no followups-specific log at all. Bumped here
+      # to match RAG_LLM_MAX_TOKENS/RAG_HEAVY_MAX_TOKENS's already-learned fix for the same
+      # model above, and RAG_GRAPH_EXTRACT_MAX_TOKENS's default (3000) for the same reason).
+      - RAG_FOLLOWUPS_ENABLED=true
+      - RAG_FOLLOWUPS_BACKEND=llm
+      - RAG_FOLLOWUPS_MAX_TOKENS=3000
+      # Grounded query disambiguation (Layer-2 item 4) — "Did you mean …?" options, grounded-only.
+      - RAG_CLARIFY_ENABLED=true
+      - RAG_CLARIFY_BACKEND=llm
+      # Auto-metadata & taxonomy tagging (FR-B7) — filterable tags derived at ingest.
+      - RAG_AUTO_METADATA_ENABLED=true
+      # --- Additional capabilities enabled for full end-to-end testing (all config-only) ---
+      # OCR (FR-B1) — extract text from scanned PDFs (tesseract + poppler in the image).
+      - RAG_OCR_BACKEND=tesseract
+      - RAG_OCR_LANG=eng+hin
+      # Structured field extraction (FR-B2) — GSTIN/PAN/IFSC/dates/amounts → filterable metadata.
+      - RAG_FIELD_EXTRACTION_ENABLED=true
+      # Indic multilingual — script-based language detection + LLM translation via the KB model.
+      - RAG_LANGUAGE_DETECTION_ENABLED=true
+      - RAG_TRANSLATION_BACKEND=llm
+      # Retrieval-quality features (additive, new-ingest for contextual).
+      - RAG_CONTEXTUAL_RETRIEVAL_ENABLED=true
+      - RAG_ADAPTIVE_ROUTER_ENABLED=true
+      - RAG_QUERY_TRANSFORM_ENABLED=true
+      # Slice 2a: match EXACT technical tokens (chemical formulas / SMILES / identifiers) via a
+      # whitespace `text.exact` sub-field. Per-KB adaptive via the `exact_boost` threshold override.
+      - RAG_EXACT_TERM_MATCH_ENABLED=true
+      # Slice 4: notation verbatim-grounding — extends the numeric faithfulness check to catch unit
+      # mismatches (5 g vs 5 mg), sub/superscript formula differences (H₂SO₄ vs H₂SO₃) and invented
+      # chemical/SMILES notation. Per-KB adaptive via the `notation_grounding_enabled` threshold
+      # override (a pharma KB turns it on hard; an HR KB may leave it off).
+      - RAG_NOTATION_GROUNDING_ENABLED=true
+      # Strict, adaptive completeness guard (Slice 1): a truncated grounded answer is continued in
+      # bounded steps, an incomplete one runs a bounded coverage loop, and if neither resolves the
+      # answer is MARKED incomplete rather than shipped whole. Ceilings are adaptive per query/KB.
+      - RAG_COMPLETENESS_GUARD_ENABLED=true
+      # Slice 3: structure-aware parent/child. A KB adopts it per-doc via reindex with
+      # strategy=parent_child; this flag is a safe no-op on any KB whose chunks carry no parent_id,
+      # so it only affects a KB that has actually been reindexed to the parent_child strategy.
+      - RAG_PARENT_CHILD_ENABLED=true
+      # Slice 2b master gate: multi-vector retrieval (dense + learned-sparse + ColBERT via the bge-m3
+      # /embed endpoint). A safe no-op unless a KB has ATTACHED the bge_m3_multi embedder AND been
+      # reindexed to the named collection — existing openai_compat KBs stay dense-only, unchanged.
+      - RAG_MULTIVECTOR_ENABLED=true
+      # Slice 6 master gate: domain-adaptive profiling (detect a KB's domain, SUGGEST its knobs) +
+      # typed domain-relation extraction. Detect-and-suggest only — detection never moves a knob;
+      # an operator confirms via POST /kb/{id}/profile/apply. Safe no-op when off: no detector, no
+      # domain-relation extractor, no new tenant_config keys written. ON here so the endpoints are
+      # reachable; the domain-relation extractor still additionally requires GraphRAG + the per-KB
+      # domain_relations_enabled gate before it fires at ingest.
+      - RAG_DOMAIN_PROFILE_ENABLED=true
+      - RAG_DOMAIN_PROFILE_BACKEND=heuristic
+      - RAG_DOMAIN_RELATION_BACKEND=heuristic
+      # Slice 6 Phase C master gate: RDKit SMILES canonicalization. A safe no-op unless a KB has the
+      # per-KB chem_normalization_enabled knob set AND a chemistry domain profile AND has been
+      # reindexed (chem terms are stamped at ingest) — and unless rdkit is installed in the image
+      # (it is; see apps/api/Dockerfile). Non-chemistry / unreindexed KBs stay byte-identical: the
+      # query carries no chem_terms, so the sparse chem clause never fires.
+      - RAG_CHEM_NORMALIZATION_ENABLED=true
+      # Agentic query planner: an LLM reads the FULL query + light KB context and returns an
+      # execution plan (whole_document / passages / whole_kb / catalog / count / compare); the
+      # pipeline runs the mechanism from the plan instead of a static keyword classifier. Includes
+      # a whole-document read (single full-context pass when the doc fits the model window, else
+      # map-reduce) so a "summarise this document" query covers the WHOLE doc, not top-k. Additive,
+      # fail-safe (falls back to the heuristic classifier if the model is down / plan is malformed —
+      # never 500s), sovereign (uses the KB's own model). Default OFF in code; ON here to test.
+      - RAG_QUERY_PLANNER_ENABLED=true
+      # gemma4-31b on this endpoint (uat-bodhi) has a ~32k usable context window (probed: 32k OK,
+      # 40k → 500), NOT the 128k code default. Set the REAL window so the whole-document read's
+      # effective budget = min(full_read_budget, window - reserve) forces map-reduce for docs that
+      # would otherwise exceed what the model accepts (a single oversized read was 500ing and
+      # silently falling through to top-k). Batch a bit larger so a big doc is a few map calls, not
+      # dozens — 40 chunks (~5k tokens) stays well under the window.
+      - RAG_LLM_CONTEXT_WINDOW=32768
+      - RAG_WHOLE_DOC_SUMMARY_BATCH_CHUNKS=40
+      # Batch concurrency for the whole-doc read. Measured on this endpoint: cap 8 was SLOWER than
+      # cap 4 (247s vs 176s) — it has limited throughput and contends under many concurrent heavy
+      # requests, so a moderate cap is best. The real latency floor is the endpoint, not the client.
+      - RAG_WHOLE_DOC_MAP_CONCURRENCY=4
+      # Tier 3: agentic coverage-verification for the whole-document read. Completeness counts only
+      # SUBSTANTIVE passages (boilerplate — page footers, contact lines, master-listing index rows —
+      # excluded; anything with an obligation verb is always substantive so a real obligation is never
+      # hidden), then a bounded loop re-reads any genuinely-uncovered substantive chunks and folds the
+      # omitted points in (grounded + cited). Additive, fail-safe (a refine failure keeps the answer),
+      # default OFF in code; ON here. Bound = RAG_COMPLETENESS_COVERAGE_MAX_LOOPS (default 3).
+      - RAG_COVERAGE_VERIFY_ENABLED=true
+      # Whole-document coverage-loop bound kept LOW (2) for latency: the loop makes SEQUENTIAL model
+      # calls, so each extra pass adds seconds. 1-2 passes close the real gaps the single read misses;
+      # chasing full convergence on a 181-chunk doc took many passes for marginal gain. The signal
+      # stays honest — complete reports false with "more may be extractable" when it doesn't converge.
+      - RAG_COMPLETENESS_COVERAGE_MAX_LOOPS=2
+      # Neighbour expansion (FR: recover answers that span contiguous passages / split lists).
+      - RAG_NEIGHBOUR_EXPANSION_ENABLED=true
+      - RAG_NEIGHBOUR_WINDOW=2
+      - RAG_NEIGHBOUR_EXPAND_TOP=3
+      # Governed NL→SQL (FR-D10) + agentic-workflow runtime (FR-F).
+      - RAG_NL2SQL_ENABLED=true
+      - RAG_AGENTIC_WORKFLOWS_ENABLED=true
+      # --- Federated RAG federation + NLI faithfulness + multimodal (all default OFF) ---
+      # These stay commented so the base dev stack comes up UNCHANGED. Uncomment a block
+      # AND start the matching sovereign service below to exercise the feature end-to-end.
+      # NLI faithfulness backend (E4): route grounding checks through the cross-encoder NLI
+      # service instead of the lexical/LLM checker. Requires the `nli-checker` service.
+      # - RAG_FAITHFULNESS_BACKEND=nli
+      # - RAG_NLI_URL=http://nli-checker:80
+      # Multimodal RAG (image/text CLIP-style embeddings). Requires the `tei-vision` service.
+      # - RAG_MULTIMODAL_ENABLED=true
+      # - RAG_VISION_TEI_URL=http://tei-vision:80
+      # Chandra as the ONE vision model — OCR + vision gateway. TWO ways to run it:
+      #  (a) chandra_api  → hosted Chandra on Datalab's cloud (no GPU; test now with an API key):
+      # - RAG_OCR_BACKEND=chandra_api
+      # - RAG_VISION_LLM_BACKEND=chandra_api
+      # - RAG_DATALAB_API_KEY=<datalab-key>
+      #  (b) chandra      → self-hosted Chandra via vLLM (GPU; the `chandra` service below):
+      # - RAG_OCR_BACKEND=chandra
+      # - RAG_VISION_LLM_BACKEND=chandra
+      # - RAG_CHANDRA_URL=http://chandra:8000/v1
+      # Cross-department P2P federation (Federated RAG). Requires the `sovereign-node` mesh
+      # (see the commented service stub below) + issued grants; the API answers federated
+      # queries only for peers holding an active cryptographic grant.
+      # - RAG_FEDERATION_ENABLED=true
+      # Sovereignty allowlist. models-dev.example.internal is the AIOps platform model endpoint
+      # (sovereign/India-hosted), added so a tenant can attach it as their model (FR-E1).
+      # 192.0.2.13 = internal Swayatta Postgres (NL->SQL source DB, added on request 2026-07-27)
+      # models.example.internal = the GPU-backed AIOps model host (Qwen 32B, bge-m3, bge-reranker).
+      # nli-checker,tei-vision are internal sovereign services (NLI faithfulness +
+      # multimodal embeddings) reached over the compose network — allowlisted like tei/reranker.
+      # api.sarvam.ai = Sarvam text API. www.datalab.to was REMOVED: Chandra runs self-hosted on
+      # AIOps, and an allowlisted foreign host nobody uses is a door left open, not a spare.
+      - RAG_ALLOWED_EGRESS_HOSTS=localhost,tei,reranker,reranker-gpu,vllm,llama,qdrant,opensearch,minio,postgres,otel-collector,nli-checker,tei-vision,chandra,api.sarvam.ai,models-dev.example.internal,models.example.internal,docs.example.com,192.0.2.13,azurite
+    # The console (nginx) proxies /v1 internally over the compose network, so the API's
+    # host-published port is for direct/admin access only — bind it to localhost in prod
+    # (RAG_INFRA_BIND=127.0.0.1); default 0.0.0.0 keeps dev browsable at :8000.
+    ports: ["${RAG_INFRA_BIND:-0.0.0.0}:8000:8000"]
+    # PDF parsing + OCR rasterisation + embedding of large handbooks (300+ chunks) spikes
+    # well past 1g, especially with concurrent uploads — 1g got OOM-killed (exit 137). 3g
+    # gives real documents headroom; size higher in prod for heavy bulk ingestion.
+    mem_limit: 3g
+    mem_reservation: 512m
+    depends_on:
+      postgres: { condition: service_healthy }
+      qdrant: { condition: service_started }
+      opensearch: { condition: service_started }
+      minio: { condition: service_started }
+      tei: { condition: service_started }
+      reranker: { condition: service_started }
+
+  console:                                  # Admin console (FR-H3) — nginx-served SPA
+    # Built SPA served on the same origin as the API (nginx proxies /v1 + /health to
+    # `api`), so the whole platform is browsable at http://<host>/ after `make up` — no
+    # separate dev server, no CORS. DEV convenience; prod serves the SPA behind the
+    # ingress (infra/helm), not this container.
+    build:
+      context: ../..
+      dockerfile: apps/console/Dockerfile
+    # UI served on 8082 only (host port 80 is left free for other use).
+    ports: ["8082:80"]
+    mem_limit: 128m
+    mem_reservation: 32m
+    depends_on:
+      api: { condition: service_started }
+
+volumes:
+  azurite-data:
+  qdrant-data:
+  opensearch-data:
+  minio-data:
+  pg-data:
+  tei-cache:
+  reranker-cache:
+  reranker-gpu-cache:
+  tei-gpu-cache:
+  llama-cache:
+  nli-cache:                                # NLI faithfulness model cache (default-off service)
+  tei-vision-cache:                         # Multimodal (vision) embedding model cache (default-off)

@@ -1,0 +1,244 @@
+# RAG v2 gold suite — the TENDER CORRIGENDUM document class (plan §11, Appendix A).
+#
+# WHERE THESE ITEMS COME FROM, because it decides how much they are worth: they are the plan's own
+# Appendix A table, transcribed. They are the OWNER'S gold, written before any of this code
+# existed and before the document was in the repository — not derived from what the pipeline
+# happens to produce, which is what makes them worth failing against.
+#
+# Every item was spot-checked against the real `Corrigendum-5.pdf` when it arrived (80 pages,
+# 24-09-2026, NIT AEGCL/CGM/SLDC/T-161/Pt-23/26-27): MAAT ₹35 Cr → ₹19.44 Cr, SAN ≥ 75 TB usable,
+# 6000 sustained EPS, data diode IEC 62443-4-2, desktop console EPEAT Gold, ITSM PeopleCert ≥ 7
+# ITIL v4 practices, ≥ 3000 OOTB SIEM rules. Appendix A is accurate.
+#
+# THIS IS THE SECOND OF THE PLAN'S FOUR DOCUMENT CLASSES. The SOP is `sop.yaml`; the HR policy
+# handbook and the technical paper are still an open [ASK] (discovery §9.3).
+#
+# SUPERSESSIONS ARE REAL HERE, unlike in `sop.yaml` — this document IS an amendment, so it is the
+# first suite that can measure `supersession_correctness` at all.
+#
+# A NOTE HERE ONCE CLAIMED `C03` WAS NOT ANSWERABLE FROM THIS DOCUMENT. That was wrong, and the
+# way it was wrong is worth keeping. The claim came from grepping a scratch extraction artifact
+# (`text4.txt`) rather than the ingested corpus; the clause is in the document and reaches the
+# retriever at rank 2:
+#
+#   "The Bidder shall have experience of operation of a Security Operation Centre and/or Network
+#    Operation with a similar solution, for a continuous period of minimum 6 (six) months."
+#
+# Measured 2026-10-26 with `scripts/retrieval_metrics.py` against a real KB: all seven §A.2
+# lookups retrieve their evidence at rank 1 or 2 — Recall@5 1.000, MRR 0.929 — with no corpus
+# gaps and no retrieval misses. The two that still fail the answer score therefore fail at
+# GENERATION, with the evidence in front of the model.
+#
+#   uv run python scripts/eval_gate.py --kb <kb> --suite eval/gold/aegcl_corrigendum.yaml --repeat 3
+
+suite_version: 1
+doc_type: corrigendum
+notes: >
+  AEGCL SOC/NOC Corrigendum-V (24-09-2026) with Attachment-1 (the amended Appendix D Data
+  Requirement Sheet). Checklist transcribed from the upgrade plan's Appendix A; lookup items from
+  its §A.2. Tiers are the plan's own must/should.
+
+queries:
+  # --- the aggregate query the plan's §8 and §9 acceptance are both written against -------------
+  - query: give me the compliance details from this document
+    intent: aggregate
+    checklist:
+      - id: C01
+        facet: eligibility
+        must_contain: [NG-SIEM]
+        tier: must
+      - id: C02
+        facet: eligibility
+        must_contain: [NMS]
+        tier: must
+      - id: C03
+        facet: eligibility
+        must_contain: ["6 (six) months"]
+        tier: must
+      - id: C04
+        facet: eligibility
+        must_contain: ["15 crores"]
+        tier: must
+      - id: C05
+        facet: financial
+        must_contain: ["19.44"]
+        tier: must
+      - id: C06
+        facet: documentation
+        must_contain: [GTP]
+        tier: must
+      - id: C07
+        facet: supply_chain
+        must_contain: [CERT-In, SBOM]
+        tier: must
+      - id: C08
+        facet: documentation
+        must_contain: [withdrawn]
+        tier: must
+      - id: C09
+        facet: documentation
+        must_contain: [Attachment]
+        tier: must
+      - id: C10
+        facet: supply_chain
+        must_contain: [Video Wall, HBOM]
+        tier: must
+      - id: C11
+        facet: certifications
+        must_contain: [Video Wall, "UL 62368"]
+        tier: must
+      - id: C12
+        facet: supply_chain
+        must_contain: [Workstation, BOM]
+        tier: must
+      - id: C13
+        facet: documentation
+        must_contain: [Workstation, test report]
+        tier: should
+      - id: C14
+        facet: supply_chain
+        must_contain: [Switches, SBOM]
+        tier: must
+      - id: C15
+        facet: certifications
+        must_contain: [Switches, "UL 62368"]
+        tier: must
+      - id: C16
+        facet: certifications
+        must_contain: ["IEC 61000-4-5"]
+        tier: must
+      - id: C17
+        facet: supply_chain
+        must_contain: [Firewall, HBOM]
+        tier: must
+      - id: C18
+        facet: certifications
+        must_contain: [Firewall, "CSA 22.2"]
+        tier: must
+      - id: C19
+        facet: certifications
+        must_contain: [Firewall, ESD]
+        tier: should
+      - id: C20
+        facet: oem_credentials
+        must_contain: [Firewall, "different original equipment manufacturers"]
+        tier: should
+      - id: C21
+        facet: supply_chain
+        must_contain: [Router, HBOM, SBOM]
+        tier: must
+      - id: C22
+        facet: certifications
+        must_contain: [Router, "FCC Part 15"]
+        tier: must
+      - id: C23
+        facet: certifications
+        must_contain: [Data Diode, "IEC 62443-4-2"]
+        tier: must
+      - id: C24
+        facet: oem_credentials
+        must_contain: [Data Diode, India]
+        tier: should
+      - id: C25
+        facet: oem_credentials
+        must_contain: [NG-SIEM, India, "5 Years"]
+        tier: should
+      - id: C26
+        facet: oem_credentials
+        must_contain: [same OEM]
+        tier: should
+      - id: C27
+        facet: oem_credentials
+        must_contain: [NMS, deployed]
+        tier: should
+      - id: C28
+        facet: oem_credentials
+        must_contain: [DAM, database]
+        tier: should
+      - id: C29
+        facet: certifications
+        must_contain: [PeopleCert]
+        tier: should
+      - id: C30
+        facet: certifications
+        must_contain: [Rack, "IEC 60297"]
+        tier: should
+      - id: C31
+        facet: certifications
+        must_contain: [EPEAT]
+        tier: should
+      - id: C32
+        facet: frameworks
+        must_contain: [MITRE, "3000"]
+        tier: should
+      - id: C33
+        facet: frameworks
+        must_contain: ["ISO 27001"]
+        tier: should
+      - id: C34
+        facet: frameworks
+        must_contain: [GDPR]
+        tier: should
+      - id: C35
+        facet: frameworks
+        must_contain: [PCI]
+        tier: should
+      - id: C36
+        facet: sovereignty
+        must_contain: [CERT-In, TAXII]
+        tier: should
+      - id: C37
+        facet: sovereignty
+        must_contain: [no internet]
+        tier: should
+      - id: C38
+        facet: lifecycle
+        must_contain: ["6 Year"]
+        tier: should
+      - id: C39
+        facet: sizing
+        must_contain: ["N-1", "30%"]
+        tier: should
+      - id: C40
+        facet: supply_chain
+        must_contain: ["TPM 2.0"]
+        tier: should
+    supersessions:
+      - field: MAAT
+        old: Rs. 35 Crores
+        new: Rs. 19.44 Crores
+      - field: BDS ITB 1.3.9.1 item 5
+        old: letterhead of the respective OEM
+        new: GTP/Data Sheet
+      - field: D.3
+        old: Individual Confidentiality Declaration
+        new: withdrawn
+
+  # --- §A.2 lookups ------------------------------------------------------------------------------
+  - query: What is the minimum average annual turnover now required?
+    intent: lookup
+    expected_answer: "19.44"
+
+  - query: What is the minimum combined value of qualifying projects?
+    intent: lookup
+    expected_answer: "15 crores"
+
+  - query: What is the sustained EPS the SIEM must handle?
+    intent: lookup
+    expected_answer: "6000"
+
+  - query: How long must the bidder have operated a SOC or NOC?
+    intent: lookup
+    expected_answer: "6 (six) months"
+
+  - query: Which CERT-In guideline applies to vendor undertaking D.1?
+    intent: lookup
+    expected_answer: SBOM
+
+  - query: What usable capacity is required for the SAN?
+    intent: lookup
+    expected_answer: "75 TB"
+
+  - query: Which standard must the data diode comply with for industrial security?
+    intent: lookup
+    expected_answer: IEC 62443-4-2

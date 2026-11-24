@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RAG as a Service Widget — demo host page</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 48px; color: #1a1a2e; }
+    .wrap { max-width: 640px; margin: 0 auto; }
+    code { background: #f0f2f5; padding: 2px 6px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Acme Cloud</h1>
+    <p>This is a mock host page. The RAG as a Service widget appears bottom-right once a session resolves.</p>
+    <p>To run it, serve this folder and point <code>data-session-url</code> at an endpoint that
+       proxies <code>POST /v1/widget/session</code> (see README). For a quick local demo, stub it
+       with a static JSON matching the widget-session response shape.</p>
+  </div>
+
+  <!-- Point data-base at your RAG as a Service API, and data-session-url at your server's proxy. -->
+  <script src="./dist/widget.js"
+          data-base="http://localhost:8000"
+          data-session-url="/api/ragaas-session"></script>
+</body>
+</html>

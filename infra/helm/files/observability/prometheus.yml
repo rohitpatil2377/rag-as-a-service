@@ -1,0 +1,18 @@
+# Prometheus scrape config (dev). Metrics arrive via the OTel Collector's exporter.
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: otel-collector
+    static_configs:
+      - targets: ["otel-collector:8889"]
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+  # RAGAS governance gate metrics (rag_ragas_*). The gate writes a Prometheus textfile that
+  # the node-exporter textfile collector re-exposes; see docs/qa/OBSERVABILITY.md and the
+  # node-exporter service in infra/compose/docker-compose.dev.yml. If the gate has not been
+  # run yet this target is UP but exposes no rag_ragas_* series (only node_* scaffolding).
+  - job_name: ragas-textfile
+    static_configs:
+      - targets: ["node-exporter:9100"]

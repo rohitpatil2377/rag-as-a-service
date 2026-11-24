@@ -1,0 +1,64 @@
+# Template for `docker-compose.override.yml` — copy, then fill in YOUR OWN key values.
+#
+#     cp infra/compose/docker-compose.override.example.yml \
+#        infra/compose/docker-compose.override.yml
+#
+# The real file is GITIGNORED and must stay that way: it holds API-key VALUES and nothing else
+# of consequence. Every non-secret setting (model names, endpoints, thresholds, tuning) belongs
+# in the COMMITTED docker-compose.deploy.example.yml. This file is merged LAST so the keys land on top.
+#
+# You do NOT need this file to run the platform. `make up` works without it — the Makefile skips
+# it when absent (`$(wildcard ...)`) and the stack falls back to the local in-container models
+# defined in docker-compose.dev.yml. You need it only to point the platform at hosted model
+# endpoints, which is what a real deployment does.
+#
+# SOVEREIGNTY: every endpoint you name here must also be on the egress allowlist
+# (RAG_SOVEREIGN_ALLOWED_HOSTS in docker-compose.deploy.example.yml) or the runtime guard refuses the
+# call and fails closed. That is deliberate — see rag_common.sovereignty.assert_sovereign.
+
+services:
+  api:
+    environment:
+      # --- generation (an OpenAI-compatible endpoint; Acme MaaS carries the key in `apikey`) ---
+      - RAG_LLM_API_KEY=
+
+      # --- embeddings ---
+      # Whatever you use here fixes the vector DIMENSION, and the dimension is a stored contract:
+      # a collection built at 1024 fails loudly against a 384-dim embedder rather than silently
+      # returning nonsense. Changing this on a KB that already holds documents needs a re-index.
+      - RAG_EMBED_API_KEY=
+
+      # --- reranking ---
+      # Note the value INCLUDES the scheme when the provider wants one, e.g. "Bearer <key>".
+      - RAG_RERANK_API_KEY=
+      - RAG_RERANK_FALLBACK_API_KEY=
+
+      # --- OCR (optional; only needed for scanned PDFs and diagram images) ---
+      - RAG_OCR_BACKEND=chandra
+      - RAG_CHANDRA_URL=https://models.example.internal/openai/v1
+      - RAG_CHANDRA_MODEL=chandra-ocr
+      - RAG_CHANDRA_API_KEY_HEADER=apikey
+      - RAG_CHANDRA_API_KEY=
+      - RAG_DATALAB_API_KEY=
+
+      # --- answer-quality flags (not secrets; here so they are easy to try) -------------------
+      # Contiguity recall. A list longer than one passage retrieves INCOMPLETELY without it: the
+      # middle of a list shares little vocabulary with the question, so it ranks below passages
+      # that merely mention the topic, and raising top_k does not help because the problem is
+      # ranking, not depth. Measured on a real HR handbook: six core values returned 2/6 and a
+      # committee roster 2/5; both complete with this on.
+      - RAG_NEIGHBOUR_EXPANSION_ENABLED=true
+      - RAG_NEIGHBOUR_WINDOW=2
+      - RAG_NEIGHBOUR_EXPAND_TOP=3
+      # Version conflict: when two documents disagree, lead with the one in force and record
+      # what it replaced, instead of reporting both and saying "the sources differ".
+      - RAG_VERSION_CONFLICT_ENABLED=true
+      # ...but only between VERSIONS OF THE SAME DOCUMENT. How alike two titles must be before
+      # one may be called a version of the other. Measured on a real corpus: two editions of one
+      # HR handbook score 0.67 and resolve; "Travel Policy" vs "Leave Policy" scores 0.33 and
+      # does not. Lowering this starts merging unrelated policies into one version history.
+      - RAG_VERSION_FAMILY_SIMILARITY=0.6
+
+  # The p2p mesh (infra/compose/docker-compose.mesh.example.yml) runs one API per department. Compose
+  # cannot inherit another service's environment, so each instance repeats the same keys. Add
+  # an api-b / api-c / api-d block here ONLY if you run the mesh overlay.

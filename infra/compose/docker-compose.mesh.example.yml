@@ -1,0 +1,264 @@
+# Decentralized N-department libp2p mesh — dept-a / dept-b / dept-c / dept-d (Operations),
+# proving the pattern generalizes past the original hardcoded 3.
+#
+# Topology (per the "shared infra, isolated namespaces" decision): the Qdrant / OpenSearch /
+# Postgres / MinIO / model stores AND the rag-api are SHARED, with per-tenant namespaces;
+# but EACH department runs its OWN sovereign-node with a DISTINCT libp2p identity + grant
+# key. Decentralization (node identity, mesh transport, grant sign/verify, zero-trust
+# revocation) is fully real end-to-end; only the physical store is shared.
+#
+# Always merged ON TOP of the base stack so the nodes join the same network as `api`:
+#   docker compose -f docker-compose.dev.yml -f docker-compose.deploy.yml \
+#                  -f docker-compose.override.yml -f docker-compose.mesh.yml <cmd>
+# Bring the mesh up with mesh/bootstrap.sh (generates identities, writes the peer registry,
+# mints per-dept bridge tokens, wires bootstrap peers). Then run mesh/demo.sh.
+#
+# Peers dial each other by /dns4/<service>/tcp/4001/p2p/<peerid> over the compose network —
+# no host port publishing needed. The loopback control API (7070) stays intra-network; the
+# demo drives it via `docker exec … curl`. libp2p 4001 is intra-mesh only.
+
+x-node: &node
+  build:
+    context: ../../sovereign-node
+  image: ragaas-sovereign-node:dev
+  depends_on:
+    - api
+  restart: unless-stopped
+
+# --- Per-dept API entry points (api-b / api-c) ---------------------------------------------
+# Architectural fix: the single shared `api` service below hardcodes
+# RAG_FEDERATION_NODE_URL=http://node-a:7070, so EVERY outbound federation dial (regardless of
+# which tenant is actually asking) goes out as dept-a's libp2p identity. That only coincidentally
+# worked when dept-a was the asker — dept-b/dept-c could RECEIVE federated queries (inbound, via
+# their own node's --rag-url=http://api:8000) but could never INITIATE one under their own
+# identity. Per docs/deployment-runbook.md the sovereign-node chart is "one release per
+# department" — the true topology is one API instance per department. api-b/api-c below are that
+# topology for this one-VM demo: same image, same shared stores (Qdrant/OpenSearch/Postgres/
+# MinIO/models — tenant isolation is by kb_id/tenant_id, not by container), and the SAME merged
+# config the deployed `api` resolves to (dev.yml + deploy.yml, confirmed via
+# `docker inspect ragaas-dev-api-1`) — ONLY the federation node identity/peers and the
+# published port differ per instance. API-key secrets stay out of this (committed) file — they're
+# added per-instance from the gitignored docker-compose.override.yml, same rule as the base `api`.
+x-api-healthcheck: &api-healthcheck
+  # Deep readiness gate (not shallow liveness): /readyz returns 503 when a store a query needs is
+  # unreachable, so docker marks the replica UNHEALTHY instead of leaving a can't-serve api "Up".
+  # No curl/wget in the image, so probe via the venv python (urlopen raises on 503 -> exit 1).
+  test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/readyz', timeout=5).status == 200 else 1)"]
+  interval: 30s
+  timeout: 8s
+  retries: 3
+  start_period: 60s
+
+x-api-env: &api-common-env
+  RAG_ENV: dev
+  RAG_OTEL_ENABLED: "true"
+  RAG_PLATFORM_ADMIN_EMAILS: superadmin@acme.example  # SUPER_ADMIN allowlist (see deploy.yml note)
+  RAG_PII_CLASSIFICATION_ENABLED: "true"  # fail-closed PII classification floor (per-dept apis)
+  # Exactly-one-drainer: the bulk-ingest queue is a SHARED Postgres table, so only ONE replica
+  # should drain it (design invariant; without a Redis lease, 4 workers race and mark good docs
+  # Failed). The dept apis exist for federation, not ingestion — the main api (:8000) drains the
+  # whole queue for every KB. Keep this ON only on the main `api` (deploy.yml default = true).
+  RAG_BULK_INGEST_WORKER_ENABLED: "false"
+  RAG_QDRANT_URL: http://qdrant:6333
+  RAG_OPENSEARCH_URL: http://opensearch:9200
+  RAG_MINIO_ENDPOINT: minio:9000
+  RAG_POSTGRES_DSN: postgresql+psycopg://rag:rag@postgres:5432/rag
+  RAG_TEI_URL: https://models.example.internal/openai/v1
+  RAG_RERANK_URL: https://models.example.internal/openai/v1
+  RAG_RERANK_MODEL: bge-reranker
+  RAG_RERANK_API_SHAPE: cohere
+  RAG_RERANK_API_KEY_HEADER: apikey
+  RAG_RERANK_BACKEND: openai_compat
+  RAG_LLM_BACKEND: openai_compat
+  RAG_VLLM_URL: https://models-uat.example.internal/openai/v1
+  RAG_LLM_MODEL: gemma4-31b
+  RAG_LLM_API_KEY_HEADER: apikey  # probed: Authorization 401, apikey 200 on this endpoint
+  RAG_LLM_MAX_TOKENS: "4000"
+  RAG_HEAVY_MAX_TOKENS: "4000"
+  RAG_EMBED_BACKEND: openai_compat
+  RAG_EMBED_MODEL: bge-m3
+  RAG_EMBED_DIM: "1024"
+  RAG_EMBED_API_KEY_HEADER: apikey
+  RAG_ABSTAIN_THRESHOLD: "0.23"  # calibrated for bge-reranker-v2-m3, see deploy.yml
+  RAG_CHUNK_SIZE: "250"
+  RAG_CHUNK_OVERLAP: "50"
+  RAG_OCR_BACKEND: chandra  # self-hosted on AIOps, never the foreign Datalab API (see deploy.yml)
+  RAG_PDF_IMAGE_PAGES: text_only
+  # chandra: reads RAG_CHANDRA_* (our own AIOps), so OCR and image Q&A share one vision model
+  # and one credential. Gemma answered a question about content that was NOT in the image with
+  # unrelated content from it rather than saying so -- see deploy.yml for the measurement.
+  RAG_VISION_LLM_BACKEND: chandra
+  # Kept for a one-line revert; unread while the backend is chandra.
+  RAG_VISION_LLM_URL: https://models-uat.example.internal/openai/v1
+  RAG_VISION_LLM_MODEL: gemma4-31b
+  RAG_VISION_LLM_API_KEY_HEADER: apikey  # probed: Authorization 401, apikey 200 on this endpoint
+  RAG_MULTIMODAL_ENABLED: "true"
+  RAG_DIAGRAM_GRAPH_ENABLED: "true"
+  RAG_FAITHFULNESS_BACKEND: nli
+  RAG_NLI_URL: http://nli-checker:80
+  RAG_NLI_MODEL: MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7
+  RAG_FAITHFUL_THRESHOLD: "0.4"
+  RAG_FLAG_THRESHOLD: "0.15"
+  RAG_GRAPHRAG_ENABLED: "true"
+  RAG_GRAPH_EXTRACT_BACKEND: translate
+  RAG_TRANSLATE_BACKEND: llm
+  RAG_GRAPH_SUMMARY_BACKEND: llm
+  RAG_OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+  RAG_SEMANTIC_CACHE_ENABLED: "true"
+  RAG_AGENTIC_RETRY_ENABLED: "true"
+  RAG_CONTINUOUS_EVAL_ENABLED: "true"
+  RAG_CONTINUOUS_EVAL_TICK_MINUTES: "1"
+  RAG_SYNC_SCHEDULER_ENABLED: "true"
+  RAG_FOLLOWUPS_ENABLED: "true"
+  RAG_FOLLOWUPS_BACKEND: llm
+  RAG_CLARIFY_ENABLED: "true"
+  RAG_CLARIFY_BACKEND: llm
+  # Same reasoning-model-budget issue as LLM_MAX_TOKENS/HEAVY_MAX_TOKENS above: sarvam-105b
+  # spends tokens on <think> before the follow-up lines, so the 1024 platform default starves
+  # it (empty content -> silent heuristic fallback, confirmed via model_returned_null_content).
+  RAG_FOLLOWUPS_MAX_TOKENS: "3000"
+  RAG_AUTO_METADATA_ENABLED: "true"
+  RAG_OCR_LANG: eng+hin
+  RAG_FIELD_EXTRACTION_ENABLED: "true"
+  RAG_LANGUAGE_DETECTION_ENABLED: "true"
+  RAG_TRANSLATION_BACKEND: llm
+  RAG_CONTEXTUAL_RETRIEVAL_ENABLED: "true"
+  RAG_ADAPTIVE_ROUTER_ENABLED: "true"
+  RAG_QUERY_TRANSFORM_ENABLED: "true"
+  # Autonomous plan-execute-critique agent (FR-F): LLM plans over the in-process tool
+  # catalog, an independent critic reviews, CRITICAL (write) steps pause for dual-control
+  # human approval, safe steps run tenant-scoped + audited, observations are synthesised.
+  RAG_AGENT_ORCHESTRATOR_ENABLED: "true"
+  RAG_NL2SQL_ENABLED: "true"
+  RAG_AGENTIC_WORKFLOWS_ENABLED: "true"
+  RAG_ALLOWED_EGRESS_HOSTS: localhost,qdrant,opensearch,minio,postgres,api.sarvam.ai,models.example.internal,models-dev.example.internal,nli-checker,192.0.2.13,models-uat.example.internal,azurite
+  RAG_FEDERATION_ENABLED: "true"
+  RAG_FEDERATION_TRANSPORT: mesh
+
+x-api-b-c-depends-on: &api-b-c-depends-on
+  postgres: { condition: service_healthy }
+  qdrant: { condition: service_started }
+  opensearch: { condition: service_started }
+  minio: { condition: service_started }
+  tei: { condition: service_started }
+  reranker: { condition: service_started }
+
+services:
+  # Enable Federated RAG federation on the SHARED api ONLY when the mesh is deployed (this file
+  # merged in). NODE_URL points at dept-a's node as the local outbound dialer — the demo asks AS
+  # dept-a and its node dials peers b/c over libp2p. Without this file, federation stays OFF.
+  api:
+    environment:
+      - RAG_FEDERATION_ENABLED=true
+      - RAG_FEDERATION_TRANSPORT=mesh
+      - RAG_FEDERATION_NODE_URL=http://node-a:7070
+      - RAG_FEDERATION_PEERS={"dept-b":{"transport":"mesh"},"dept-c":{"transport":"mesh"},"dept-d":{"transport":"mesh"}}
+      - RAG_AGENT_ORCHESTRATOR_ENABLED=true
+    healthcheck: *api-healthcheck
+
+  # dept-b's OWN api entry point — outbound federation dials go out as dept-b (node-b), not
+  # node-a. Same image as `api` (no rebuild: reuses the ragaas-dev-api image tag).
+  # Published on :8001 so dept-b can genuinely INITIATE a federated ask, not just respond to one.
+  api-b:
+    image: ragaas-dev-api
+    environment:
+      <<: *api-common-env
+      RAG_FEDERATION_NODE_URL: http://node-b:7070
+      RAG_FEDERATION_PEERS: '{"dept-a":{"transport":"mesh"},"dept-c":{"transport":"mesh"},"dept-d":{"transport":"mesh"}}'
+    ports: ["${RAG_INFRA_BIND:-0.0.0.0}:8001:8000"]
+    mem_limit: 3g
+    mem_reservation: 512m
+    depends_on: *api-b-c-depends-on
+    healthcheck: *api-healthcheck
+
+  # dept-c's OWN api entry point — outbound federation dials go out as dept-c (node-c).
+  # Published on :8002 for the same reason api-b is on :8001.
+  api-c:
+    image: ragaas-dev-api
+    environment:
+      <<: *api-common-env
+      RAG_FEDERATION_NODE_URL: http://node-c:7070
+      RAG_FEDERATION_PEERS: '{"dept-a":{"transport":"mesh"},"dept-b":{"transport":"mesh"},"dept-d":{"transport":"mesh"}}'
+    ports: ["${RAG_INFRA_BIND:-0.0.0.0}:8002:8000"]
+    mem_limit: 3g
+    mem_reservation: 512m
+    depends_on: *api-b-c-depends-on
+    healthcheck: *api-healthcheck
+
+  # dept-d's OWN api entry point — outbound federation dials go out as dept-d (node-d). Published
+  # on :8003 for the same reason api-b/api-c are on :8001/:8002. dept-d = Operations/IT Security,
+  # onboarded as the 4th department to prove the onboarding path generalizes beyond the original
+  # hardcoded 3 (see mesh/bootstrap.sh, now parametrized over DEPTS/SVCS instead of a/b/c only).
+  api-d:
+    image: ragaas-dev-api
+    environment:
+      <<: *api-common-env
+      RAG_FEDERATION_NODE_URL: http://node-d:7070
+      RAG_FEDERATION_PEERS: '{"dept-a":{"transport":"mesh"},"dept-b":{"transport":"mesh"},"dept-c":{"transport":"mesh"}}'
+    ports: ["${RAG_INFRA_BIND:-0.0.0.0}:8003:8000"]
+    mem_limit: 3g
+    mem_reservation: 512m
+    depends_on: *api-b-c-depends-on
+    healthcheck: *api-healthcheck
+
+  node-a:
+    <<: *node
+    command:
+      - --dept=dept-a
+      - --listen=/ip4/0.0.0.0/tcp/4001
+      - --rag-url=http://api:8000
+      - --rag-token=${DEPT_A_TOKEN:-}
+      - --key=/data/identity.key
+      - --control-listen=0.0.0.0:7070
+      - --registry=/etc/mesh/registry.json
+    volumes:
+      - node-a-data:/data
+      - ./mesh/registry.json:/etc/mesh/registry.json:ro
+
+  node-b:
+    <<: *node
+    command:
+      - --dept=dept-b
+      - --listen=/ip4/0.0.0.0/tcp/4001
+      - --rag-url=http://api:8000
+      - --rag-token=${DEPT_B_TOKEN:-}
+      - --key=/data/identity.key
+      - --control-listen=0.0.0.0:7070
+      - --registry=/etc/mesh/registry.json
+    volumes:
+      - node-b-data:/data
+      - ./mesh/registry.json:/etc/mesh/registry.json:ro
+
+  node-c:
+    <<: *node
+    command:
+      - --dept=dept-c
+      - --listen=/ip4/0.0.0.0/tcp/4001
+      - --rag-url=http://api:8000
+      - --rag-token=${DEPT_C_TOKEN:-}
+      - --key=/data/identity.key
+      - --control-listen=0.0.0.0:7070
+      - --registry=/etc/mesh/registry.json
+    volumes:
+      - node-c-data:/data
+      - ./mesh/registry.json:/etc/mesh/registry.json:ro
+
+  node-d:
+    <<: *node
+    command:
+      - --dept=dept-d
+      - --listen=/ip4/0.0.0.0/tcp/4001
+      - --rag-url=http://api:8000
+      - --rag-token=${DEPT_D_TOKEN:-}
+      - --key=/data/identity.key
+      - --control-listen=0.0.0.0:7070
+      - --registry=/etc/mesh/registry.json
+    volumes:
+      - node-d-data:/data
+      - ./mesh/registry.json:/etc/mesh/registry.json:ro
+
+volumes:
+  node-a-data:
+  node-b-data:
+  node-c-data:
+  node-d-data:

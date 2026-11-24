@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RAG as a Service</title>
+<!--
+  Sign-in splash. Embedded by the login page in a same-origin iframe (see Login.tsx) and served
+  by nginx under a CSP relaxed for THIS FILE ONLY, because the animation runs from the inline
+  script/style below. Everything here is self-contained: no fonts, no images, no network.
+
+  TIMING CONTRACT: the login page starts its own 0.75s cross-fade at 3600ms, so the whole
+  sequence must have reached its resting state (the "dawn" to ivory) by ~3.4s. If you lengthen
+  anything here, lengthen that timeout too or the splash gets cut off mid-animation.
+
+  `?end=dark`: in dark theme the splash must NOT dawn to ivory, or the login page fades an ivory
+  frame through a near-black plate and flashes white. It holds the dark field instead.
+-->
+<style>
+  :root {
+    --field-dark: #070C1A;
+    --field-light: #EBEFF7;
+    --amber: #FDBC2F;
+    --amber-light: #FFDC82;
+    --amber-deep: #E08A32;
+    --ink-on-dark: #E9EEF7;
+    --ink-on-light: #0D1B3A;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: grid;
+    place-items: center;
+    background: var(--field-dark);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+    animation: dawn 900ms ease-in-out 2400ms forwards;
+  }
+  /* Dark theme: skip the dawn entirely and stay on the dark field. */
+  body.end-dark { animation: none; }
+
+  @keyframes dawn { to { background: var(--field-light); } }
+
+  .stage { display: grid; place-items: center; gap: 22px; transform: translateY(-6px); }
+
+  /* ---- the mark: same geometry as components/BrandMark.tsx ---- */
+  .mark { width: 92px; height: 92px; opacity: 0; animation: mark-in 700ms cubic-bezier(.2,.7,.2,1) 120ms forwards; }
+  @keyframes mark-in {
+    from { opacity: 0; transform: scale(.82) translateY(10px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  /* The three citation bars stream in after the page exists — the retrieval beat. */
+  .bar { opacity: 0; animation: bar-in 420ms cubic-bezier(.2,.7,.2,1) forwards; transform-box: fill-box; transform-origin: left center; }
+  .bar:nth-of-type(1) { animation-delay: 760ms; }
+  .bar:nth-of-type(2) { animation-delay: 940ms; }
+  .bar:nth-of-type(3) { animation-delay: 1120ms; }
+  @keyframes bar-in { from { opacity: 0; transform: scaleX(.1); } to { opacity: 1; transform: scaleX(1); } }
+
+  /* ---- wordmark ---- */
+  .word {
+    display: flex; gap: .08em; font-size: 30px; font-weight: 700; letter-spacing: -.01em;
+    color: var(--ink-on-dark); animation: ink 900ms ease-in-out 2400ms forwards; white-space: pre;
+  }
+  body.end-dark .word { animation: none; }
+  @keyframes ink { to { color: var(--ink-on-light); } }
+  .word span { opacity: 0; animation: glyph 300ms ease-out forwards; }
+  .word .accent { color: var(--amber); }
+  @keyframes glyph { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+  .tag {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px; letter-spacing: .20em; text-transform: uppercase;
+    color: #8A97B0; opacity: 0; animation: glyph 500ms ease-out 1900ms forwards;
+  }
+
+  /* Honour a reduced-motion preference: show the resting state, animate nothing. */
+  @media (prefers-reduced-motion: reduce) {
+    body, .mark, .bar, .word, .word span, .tag { animation: none !important; opacity: 1 !important; }
+    body { background: var(--field-light); }
+    .word { color: var(--ink-on-light); }
+    body.end-dark { background: var(--field-dark); }
+    body.end-dark .word { color: var(--ink-on-dark); }
+  }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <svg class="mark" viewBox="0 0 64 64" role="img" aria-label="RAG as a Service">
+      <path fill="#FDBC2F" d="M14 2 H36 L52 18 V58 Q52 62 48 62 H14 Q10 62 10 58 V6 Q10 2 14 2 Z" />
+      <path fill="#FFDC82" d="M36 2 L52 18 H36 Z" />
+      <path fill="#E08A32" d="M14 2 H18 V62 H14 Q10 62 10 58 V6 Q10 2 14 2 Z" />
+      <rect class="bar" x="23" y="28" width="22" height="5" rx="2.5" fill="#FEFEFE" />
+      <rect class="bar" x="23" y="39" width="22" height="5" rx="2.5" fill="#FEFEFE" />
+      <rect class="bar" x="23" y="50" width="13" height="5" rx="2.5" fill="#FEFEFE" />
+    </svg>
+    <div class="word" id="word" aria-label="RAG as a Service"></div>
+    <div class="tag">Grounded answers, with citations</div>
+  </div>
+<script>
+  // Hold the dark field when the console is in dark theme (see the note at the top).
+  if (new URLSearchParams(location.search).get('end') === 'dark') {
+    document.body.classList.add('end-dark');
+  }
+  // Per-glyph reveal. Built here rather than hand-written in the markup so the lockup stays one
+  // string: "RAG" takes the accent colour, the rest is ink. Spaces are rendered but not animated
+  // individually, which keeps the cadence even.
+  var LEAD = 'RAG', REST = ' as a Service';
+  var word = document.getElementById('word');
+  function emit(text, cls, offset) {
+    for (var i = 0; i < text.length; i++) {
+      var s = document.createElement('span');
+      s.textContent = text[i];
+      if (cls) s.className = cls;
+      s.style.animationDelay = (offset + i * 45) + 'ms';
+      word.appendChild(s);
+    }
+  }
+  emit(LEAD, 'accent', 1250);
+  emit(REST, null, 1250 + LEAD.length * 45);
+</script>
+</body>
+</html>

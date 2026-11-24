@@ -1,0 +1,250 @@
+/* Acme design tokens (single source of truth) + Tailwind layers.
+ * All component classes are token-driven (var(--…)) so BOTH themes work from one set.
+ * Institutional gravitas: navy + ivory/white do the work; saffron is an accent only. */
+@import '../../../design/tokens/tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { color-scheme: light dark; }
+  body {
+    background-color: var(--canvas);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: 15px;                    /* comfortable density */
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  h1, h2, h3, h4, h5, h6 { font-family: var(--font-heading); color: var(--text-heading); }
+  ::selection { background: color-mix(in srgb, var(--action) 22%, transparent); }
+  /* Accessibility (brand §21): visible saffron focus ring, never remove outline silently. */
+  :focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 30%, transparent); border-radius: var(--radius-sm); }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; border: 2px solid var(--canvas); }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+}
+
+@layer components {
+  /* --- type helpers --- */
+  .eyebrow { font-family: var(--font-mono); font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .28em; color: var(--action); }
+  .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* --- buttons (>=44px targets, 160ms transitions) --- */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; font-family: var(--font-body); font-weight: 600; font-size: 14px; line-height: 1; border-radius: var(--radius-md); padding: 0 18px; min-height: 44px; border: 1px solid transparent; cursor: pointer; transition: background-color .16s ease, border-color .16s ease, color .16s ease, box-shadow .16s ease, transform .12s ease; white-space: nowrap; }
+  .btn:active { transform: translateY(.5px); }
+  .btn:disabled { opacity: .55; cursor: not-allowed; }
+  .btn-primary { background: var(--action); color: var(--on-action); }
+  .btn-primary:hover:not(:disabled) { background: var(--action-hover); }
+  .btn-secondary { background: var(--text-heading); color: var(--surface); }
+  .btn-secondary:hover:not(:disabled) { filter: brightness(1.1); }
+  .btn-ghost { background: transparent; color: var(--text-heading); border-color: var(--border-strong); }
+  .btn-ghost:hover:not(:disabled) { border-color: var(--action); color: var(--action); }
+  .btn-subtle { background: transparent; color: var(--text-muted); }
+  .btn-subtle:hover:not(:disabled) { background: color-mix(in srgb, var(--text-muted) 12%, transparent); color: var(--text-heading); }
+  .btn-danger { background: var(--danger); color: #fff; }
+  .btn-sm { min-height: 36px; padding: 0 12px; font-size: 13px; }
+  .btn-icon { padding: 0; width: 40px; min-height: 40px; }
+
+  /* --- surfaces --- */
+  .surface { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--elev-1); }
+  .surface-2 { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--elev-1); padding: 24px; }
+  .interactive { transition: box-shadow .16s ease, transform .16s ease, border-color .16s ease; }
+  .interactive:hover { box-shadow: var(--elev-2); transform: translateY(-1px); border-color: var(--border-strong); }
+  .hairline { height: 1px; background: var(--border); border: 0; }
+  .rule-gold { height: 1px; background: var(--accent); border: 0; opacity: .8; }
+
+  /* --- forms --- */
+  .field-label { display: block; font-family: var(--font-body); font-weight: 600; font-size: 13px; color: var(--text-heading); margin-bottom: 6px; }
+  .field-help { display: block; font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+  .field-input { width: 100%; font-family: var(--font-body); font-size: 15px; color: var(--text-primary); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-md); padding: 0 14px; min-height: 44px; transition: border-color .16s ease, box-shadow .16s ease; }
+  .field-input:focus { outline: none; border-color: var(--action); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 22%, transparent); }
+  .field-input::placeholder { color: var(--text-muted); }
+  textarea.field-input { padding: 12px 14px; min-height: 96px; line-height: 1.6; }
+  .field-input[aria-invalid="true"] { border-color: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent); }
+
+  /* --- table --- */
+  .tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .tbl thead th { text-align: left; font-family: var(--font-heading); font-weight: 600; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); background: var(--surface-2); padding: 12px 16px; border-bottom: 1px solid var(--border); position: sticky; top: 0; }
+  .tbl tbody td { padding: 12px 16px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .tbl tbody tr { transition: background-color .12s ease; }
+  .tbl tbody tr:hover { background: color-mix(in srgb, var(--action) 5%, transparent); }
+
+  /* --- login scene (single-page, quiet institutional motion) --- */
+  .login-scene { background: var(--canvas); }
+  .login-aura { position: absolute; border-radius: 50%; filter: blur(90px); pointer-events: none; }
+  .login-aura-navy { width: 560px; height: 560px; top: -180px; left: -140px;
+    background: color-mix(in srgb, var(--c-ink, #0D1B3A) 16%, transparent); animation: aura-drift 26s ease-in-out infinite alternate; }
+  .login-aura-saffron { width: 480px; height: 480px; bottom: -160px; right: -120px;
+    background: color-mix(in srgb, var(--action) 12%, transparent); animation: aura-drift 32s ease-in-out infinite alternate-reverse; }
+  /* Small on purpose: at the old 48x28px / 1.08 the wash visibly TRAVELLED behind the card
+     and the whole page read as drifting. This is a breath, not a move. */
+  @keyframes aura-drift { from { transform: translate(0, 0) scale(1); } to { transform: translate(14px, 8px) scale(1.025); } }
+  .login-rise { opacity: 0; animation: rise .55s cubic-bezier(.2,.6,.2,1) forwards; }
+  @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+  /* Telemetry line: redraws on a 9s loop instead of drawing once and freezing — the single
+     biggest reason the signed-out screen used to go dead a few seconds after it loaded. */
+  .login-chartline { stroke-dasharray: 1600; stroke-dashoffset: 1600; animation: chart-cycle 9s ease-out .3s infinite; }
+  @keyframes chart-cycle {
+    0%   { stroke-dashoffset: 1600; opacity: 0; }
+    5%   { opacity: .95; }
+    46%, 86% { stroke-dashoffset: 0; opacity: .95; }
+    100% { stroke-dashoffset: 0; opacity: 0; }
+  }
+  /* The grid is STRUCTURE, not motion — it stays put. It used to pan one cell per 40s,
+     which behind a stationary form read as the whole page sliding.
+
+     OFF in dark. --border sits close to the canvas in light, so the grid is a whisper; against
+     the dark canvas it contrasts hard and the form panel reads as graph paper next to the
+     brand panel's smooth gradient — two surfaces instead of one. */
+  .login-grid { opacity: .35; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .login-grid { opacity: 0; } }
+  :root[data-theme="dark"] .login-grid { opacity: 0; }
+  /* Tagline streams in per character, echoing the intro's glyph-by-glyph reveal. */
+  /* [aria-hidden] so the sibling .sr-only copy carrying the real string is left alone. */
+  .login-tag > span[aria-hidden] { display: inline-block; white-space: pre; opacity: 0; animation: tag-in .42s cubic-bezier(.2,.6,.2,1) forwards; }
+  @keyframes tag-in { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+  /* Product mock: a slow, barely-there float after it rises in. */
+  .login-float { animation: rise .55s cubic-bezier(.2,.6,.2,1) forwards, float 7s ease-in-out 1.2s infinite; }
+  @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+  /* No plate, in any theme. The mark is an amber body with its citation bars painted white
+     INTO the artwork (see BrandMark.tsx), so it was always legible on a dark rail — the ivory
+     plate just drew a white box around the logo in dark mode. */
+  .logo-plate { border-radius: 10px; padding: 0; background: transparent; }
+  /* --- login brand panel: the retrieval loop, running continuously -------------------
+     One shared 9s cycle carries the story — corpus drifts → query ring → four sources are
+     retrieved and lit → the core answers → citations land → everything settles. Ambient
+     drift and the sweep run on their own unsynced clocks (6s/11s) so it never looks
+     metronomic.
+
+     COLOUR: this panel is BRAND NAVY, not the intro's near-black #070C1A. Against the ivory
+     form panel that near-black read as two unrelated screens jammed together. The tokens file
+     is explicit that "navy + ivory do the work" — so the split stays, but at brand values
+     where it reads as one institutional surface rather than a hard seam. */
+  /* Theme-aware. The artwork reads these tokens rather than hard-coded hexes, so one
+     override flips the whole panel — field, dots, text and seam together. Light is the base;
+     the two dark rules cover "OS dark, no explicit choice" and "user chose dark". */
+  .rl-panel {
+    --rl-ink: var(--text-heading);
+    --rl-muted: var(--text-muted);
+    --rl-node: #C2CFE2;                 /* unretrieved corpus, on a near-white field */
+    --rl-idle: #93A7C8;                 /* a source before the query reaches it */
+    --rl-edge: #DCE3EF;                 /* graph edges, on a near-white field */
+    --rl-seam: var(--border);
+    background: radial-gradient(64% 64% at 38% 40%, #FFFFFF 0%, #FBFAF8 46%, #F0F3F8 100%);
+    border-right: 1px solid var(--rl-seam);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .rl-panel {
+      --rl-ink: #E9EEF7; --rl-muted: #AFC0DA; --rl-node: #3A5384; --rl-idle: #46639C; --rl-edge: #26375C; --rl-seam: #0D1B3A;
+      background: radial-gradient(64% 64% at 38% 40%, #1B3059 0%, #132444 46%, #0D1B3A 100%);
+    }
+  }
+  :root[data-theme="dark"] .rl-panel {
+    --rl-ink: #E9EEF7; --rl-muted: #AFC0DA; --rl-node: #3A5384; --rl-idle: #46639C; --rl-edge: #26375C; --rl-seam: #0D1B3A;
+    background: radial-gradient(64% 64% at 38% 40%, #1B3059 0%, #132444 46%, #0D1B3A 100%);
+  }
+  .rl-sweep { animation: rl-sweep 11s linear infinite; }
+  /* 40% wide, parked at left:-40%, so 350% of its own width crosses the panel exactly once. */
+  @keyframes rl-sweep { 0% { transform: translateX(0); opacity: 0; } 14%, 78% { opacity: .5; } 100% { transform: translateX(350%); opacity: 0; } }
+
+  /* --- brand panel scene: the RAG pipeline ------------------------------------------------
+     Corpus -> retrieval -> context window -> grounded answer, left to right across the band.
+     One shared 9s cycle. Everything is filled mass or gradient-lit beam: the earlier scenes
+     were hairlines in the faintest tokens, which is exactly why they read as wireframes.
+     Colours are set here rather than as SVG presentation attributes, since var() is not
+     reliably resolved in a presentation attribute but always is in a stylesheet. */
+  .rg-pull-0 { stop-color: var(--action); stop-opacity: .05; }
+  .rg-pull-1 { stop-color: var(--action); stop-opacity: .95; }
+  .rg-push-0 { stop-color: var(--action); stop-opacity: .9; }
+  .rg-push-1 { stop-color: var(--action); stop-opacity: .12; }
+  .rg-glow-0 { stop-color: var(--action); stop-opacity: .30; }
+  .rg-glow-1 { stop-color: var(--action); stop-opacity: 0; }
+
+  .rg-cap { fill: var(--rl-muted); font-family: var(--font-mono); font-size: 15px; letter-spacing: .26em; opacity: .8; }
+  .rg-cap-mid { text-anchor: middle; }
+
+  /* 1 — the corpus */
+  .rg-doc { fill: var(--rl-node); opacity: .55; }
+  .rg-doc-lit { animation: rg-doc 9s ease-in-out infinite; }
+  @keyframes rg-doc {
+    0%, 8%    { fill: var(--rl-node); opacity: .55; }
+    18%, 80%  { fill: var(--action); opacity: 1; }
+    92%, 100% { fill: var(--rl-node); opacity: .55; }
+  }
+
+  /* 2 — retrieval: a wide soft pass under a crisp one is what reads as light */
+  .rg-pull { fill: none; stroke: url(#ragPull); stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; animation: rg-pull 9s ease-in-out infinite; }
+  @keyframes rg-pull {
+    0%, 10%   { stroke-dashoffset: 1; opacity: 0; }
+    16%       { opacity: 1; }
+    34%, 80%  { stroke-dashoffset: 0; opacity: 1; }
+    92%, 100% { stroke-dashoffset: 0; opacity: 0; }
+  }
+
+  /* 3 — the context window: the one place the scene is allowed to flare */
+  .rg-halo { animation: rg-halo 9s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+  @keyframes rg-halo { 0%, 30% { opacity: .35; transform: scale(.9); } 50% { opacity: 1; transform: scale(1.05); } 84%, 100% { opacity: .35; transform: scale(.9); } }
+
+  .rg-core { transform-box: fill-box; transform-origin: center; animation: rg-core 9s ease-in-out infinite; }
+  @keyframes rg-core { 0%, 32% { transform: scale(1); } 48% { transform: scale(1.05); } 82%, 100% { transform: scale(1); } }
+
+  .rg-core-bloom { fill: var(--action); animation: rg-bloom 9s ease-in-out infinite; }
+  @keyframes rg-bloom { 0%, 30% { opacity: .18; } 50% { opacity: .6; } 84%, 100% { opacity: .18; } }
+  .rg-core-box { fill: var(--rl-edge); stroke: var(--action); stroke-width: 2; opacity: .95; }
+
+  .rg-ctx { fill: var(--action); opacity: 0; animation: rg-ctx 9s ease-out infinite; }
+  .rg-ctx-1 { animation-delay: .1s; }
+  .rg-ctx-2 { animation-delay: .3s; }
+  .rg-ctx-3 { animation-delay: .5s; }
+  @keyframes rg-ctx { 0%, 20% { opacity: 0; } 32%, 80% { opacity: .85; } 92%, 100% { opacity: 0; } }
+  .rg-ctx-q { fill: var(--rl-idle); opacity: .8; }
+
+  /* 4 — the generated answer */
+  .rg-push { fill: none; stroke: url(#ragPush); stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; animation: rg-pull 9s ease-in-out infinite; }
+
+  .rg-line { fill: var(--rl-ink); transform-box: fill-box; transform-origin: left center; animation: rg-line 9s cubic-bezier(.22,1,.36,1) infinite; }
+  @keyframes rg-line {
+    0%, 44%   { transform: scaleX(0); opacity: .9; }
+    56%, 82%  { transform: scaleX(1); opacity: .9; }
+    92%, 100% { transform: scaleX(1); opacity: 0; }
+  }
+
+  .rg-cite { fill: var(--action); transform-box: fill-box; transform-origin: center; animation: rg-cite 9s cubic-bezier(.34,1.3,.5,1) infinite; }
+  @keyframes rg-cite {
+    0%, 52%   { opacity: 0; }
+    62%, 82%  { opacity: 1; }
+    92%, 100% { opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    /* Hold the pipeline resolved: retrieved, assembled, answered, cited. */
+    .rg-doc-lit, .rg-halo, .rg-core, .rg-core-bloom, .rg-ctx { animation: none; }
+    .rg-doc-lit { fill: var(--action); opacity: 1; }
+    .rg-core-bloom { opacity: .4; }
+    .rg-ctx { opacity: .85; }
+    .rg-pull, .rg-push { animation: none; stroke-dashoffset: 0; opacity: 1; }
+    .rg-line { animation: none; transform: none; opacity: .9; }
+    .rg-cite { animation: none; opacity: 1; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .login-aura { animation: none; }
+    .login-rise { animation: none; opacity: 1; }
+    .login-chartline { animation: none; stroke-dashoffset: 0; opacity: .95; }
+    .login-float { animation: none; opacity: 1; }
+    .login-tag > span[aria-hidden] { animation: none; opacity: 1; transform: none; }
+    /* Hold the loop at its resolved state: sources lit, paths drawn, citations shown. */
+    .rl-sweep { animation: none; }
+  }
+
+  /* --- pills / chips --- */
+  .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; border: 1px solid; line-height: 1.4; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 4px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary); }
+}

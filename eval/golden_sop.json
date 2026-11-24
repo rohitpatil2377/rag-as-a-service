@@ -1,0 +1,96 @@
+{
+ "questions": [
+  {
+   "question": "According to the SOP Writing Guidance Pharma document, who prepares and executes an SOP?",
+   "expected": "Executive"
+  },
+  {
+   "question": "According to the SOP Writing Guidance Pharma document, who approves an SOP?",
+   "expected": "Asst. Manager"
+  },
+  {
+   "question": "In the SOP Writing Guidance Pharma document, section 3.3, which designation is responsible for authorization?",
+   "expected": "Asst. General Manager"
+  },
+  {
+   "question": "In the SOP Writing Guidance Pharma document, who is accountable under section 4.0?",
+   "expected": "Head of the Concerned Department"
+  },
+  {
+   "question": "What font must the contents of an SOP use?",
+   "expected": "Times New Roman"
+  },
+  {
+   "question": "What font size is used for the write up of the SOP?",
+   "expected": "12"
+  },
+  {
+   "question": "What paper size should an SOP be prepared on?",
+   "expected": "A-4"
+  },
+  {
+   "question": "What are the dimensions of the logo on the right hand corner?",
+   "expected": "30 mm"
+  },
+  {
+   "question": "What is the department code for Quality Control?",
+   "expected": "Q"
+  },
+  {
+   "question": "What is the department code for Engineering?",
+   "expected": "E"
+  },
+  {
+   "question": "What is the department code for Tablets?",
+   "expected": "T"
+  },
+  {
+   "question": "What is the title of PBSOP006?",
+   "expected": "Radioactive Material Handling"
+  },
+  {
+   "question": "When was revision 1 of PBSOP006 completed?",
+   "expected": "05-Dec-17"
+  },
+  {
+   "question": "Which sections were updated in revision 1 of PBSOP006?",
+   "expected": "5.4"
+  },
+  {
+   "question": "Which SOP covers mercury spills?",
+   "expected": "PBSOP010"
+  },
+  {
+   "question": "Which SOP covers emergency response and first aid?",
+   "expected": "PBSOP003"
+  },
+  {
+   "question": "What is the title of PBSOP008?",
+   "expected": "Electrical Safety"
+  },
+  {
+   "question": "Which radiation safety training courses does the OEHS offer?",
+   "expected": "Radiation Protection Training"
+  },
+  {
+   "question": "What is the objective stated in the SOP Writing Guidance Pharma document?",
+   "expected": "preparation"
+  },
+  {
+   "question": "What is the scope of the SOP on SOPs?",
+   "expected": "applicable to all"
+  },
+  {
+   "question": "How many tiers does the escalation matrix have?"
+  },
+  {
+   "question": "What is the annual leave entitlement for employees?"
+  },
+  {
+   "question": "What is the penalty for a radiation safety violation?"
+  },
+  {
+   "question": "What is the CEO's salary?"
+  }
+ ]
+}

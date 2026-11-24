@@ -1,0 +1,437 @@
+{
+ "schema_note": "Experiment B's LOOKUP gold: which SECTION answers a single-fact question. Frozen on authoring; never regenerate from system output.",
+ "corpus": {
+  "doc_id": "corrigendum-5.pdf",
+  "content_hash": "3dc59d958833024d23437d2b8ec51114c9dbda35434986950edf64f2c5d89e5a",
+  "sections_total": 53,
+  "sections_enriched": 38
+ },
+ "authored": "2026-11-03 IST",
+ "method": [
+  "HAND-AUTHORED, one primary answering section per query. The system's own predictions were never consulted: no query_log, no selected_sections, no retrieval run, no Phase-8 output.",
+  "Stratum S (standards) is ENRICHMENT-INDEPENDENT: each query is built from a cue in the frozen answer suite (eval/gold, via sec_gold_candidates) that occurs in EXACTLY ONE section of the corpus. Its provenance is the answer gold, not anything Phase 3 or Phase 4 produced.",
+  "Strata L and H are authored from quote-validated key values and breadcrumbs. Those values are verbatim spans of the document (parse_section_enrichment checks every quote against the section text), so the FACTS are the document's; what is enrichment-dependent is only which requirements were available to ask about. Stated as a limit below.",
+  "Stratum M is semantic mismatch, written by hand so that the query's distinguishing vocabulary does NOT appear in the answering section. Each record carries the measured term overlap, so the claim is checkable rather than asserted.",
+  "`14. Desktop/Console for LED Video Wall` and its EPEAT requirement are deliberately ABSENT. That omission is an aggregate-selection adjudication (docs/rag_v2/goal_scorecard.md, 2026-11-03) and making it a lookup benchmark example would be inventing a test from a known failure."
+ ],
+ "limits": [
+  "ONE document, one corrigendum family. Nothing here generalises to another corpus.",
+  "A requirement Phase 4 never extracted cannot appear in strata L, H or M -- those are authored from the enrichment, so the gold is blind in the same places the enricher is. Stratum S exists to be unaffected by that, and is the subset to trust when the arms disagree.",
+  "`answer_sections` with more than one entry are MULTI-BEARER: the requirement genuinely appears in each. A hit on any one is correct, which makes those records easier than the single-bearer ones; they are marked so they can be reported apart.",
+  "There is no negative stratum (queries the document does not answer). Lookup abstention is a different measurement and is not part of Experiment B.",
+  "Records H-04 to H-07 ask WHICH SECTION covers a topic rather than for a specific value. That is a legitimate section-finding question and it is an easier one: there is no figure to get wrong. They are a seventh of the set and can be reported apart.",
+  "S-01 and M-05 are a deliberate PAIR: the same requirement (IEC 60297) asked once in the document's own words and once in avoided vocabulary. S-02/M-06 and S-09/M-07 pair the same way. Comparing an arm's result within a pair isolates phrasing from content."
+ ],
+ "records": [
+  {
+   "query_id": "S-01",
+   "stratum": "standards",
+   "query": "Which IEC standard governs the dimensions of the equipment rack?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s3cd9cabe84d2"
+   ],
+   "requirement": "IEC 60297",
+   "provenance": "answer-suite cue 'IEC 60297', occurs in 1 section"
+  },
+  {
+   "query_id": "S-02",
+   "stratum": "standards",
+   "query": "Which security standard must the data diode be certified against?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s8eba9ec24e62"
+   ],
+   "requirement": "IEC 62443-4-2",
+   "provenance": "answer-suite cue 'IEC 62443-4-2', occurs in 1 section"
+  },
+  {
+   "query_id": "S-03",
+   "stratum": "standards",
+   "query": "Which information security management standard is required?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s5a78bf65b7e6"
+   ],
+   "requirement": "ISO 27001",
+   "provenance": "answer-suite cue 'ISO 27001', occurs in 1 section"
+  },
+  {
+   "query_id": "S-04",
+   "stratum": "standards",
+   "query": "Which data protection regulation must database monitoring support?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s5e9da02bf852"
+   ],
+   "requirement": "GDPR",
+   "provenance": "answer-suite cue 'GDPR', occurs in 1 section"
+  },
+  {
+   "query_id": "S-05",
+   "stratum": "standards",
+   "query": "Which adversary knowledge base must detections be aligned to?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s5a78bf65b7e6"
+   ],
+   "requirement": "MITRE",
+   "provenance": "answer-suite cue 'MITRE', occurs in 1 section"
+  },
+  {
+   "query_id": "S-06",
+   "stratum": "standards",
+   "query": "Which certification scheme is named for the service management personnel?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s78bd4ad595cc"
+   ],
+   "requirement": "PeopleCert",
+   "provenance": "answer-suite cue 'PeopleCert', occurs in 1 section"
+  },
+  {
+   "query_id": "S-07",
+   "stratum": "standards",
+   "query": "Must the firewalls be supplied by the same manufacturer as the other equipment?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s17c0dd85dc0f"
+   ],
+   "requirement": "different original equipment manufacturers",
+   "provenance": "answer-suite cue 'different original equipment manufacturers', occurs in 1 section"
+  },
+  {
+   "query_id": "S-08",
+   "stratum": "standards",
+   "query": "What documentary evidence of compliance must accompany the workstation?",
+   "answer_sections": [
+    "corrigendum-5.pdf::sd6174a0dd945"
+   ],
+   "requirement": "test report",
+   "provenance": "answer-suite cue 'test report', occurs in 1 section"
+  },
+  {
+   "query_id": "S-09",
+   "stratum": "standards",
+   "query": "What minimum average annual turnover must a bidder demonstrate?",
+   "answer_sections": [
+    "corrigendum-5.pdf::sfd9ca52ef13b"
+   ],
+   "requirement": "Rs. 19.44 Crores (MAAT)",
+   "provenance": "answer-suite cue '19.44', occurs in 1 section"
+  },
+  {
+   "query_id": "S-10",
+   "stratum": "standards",
+   "query": "What combined value of qualifying project experience is required?",
+   "answer_sections": [
+    "corrigendum-5.pdf::sc63e062f78d8"
+   ],
+   "requirement": "15 crores",
+   "provenance": "answer-suite cue '15 crores', occurs in 1 section"
+  },
+  {
+   "query_id": "S-11",
+   "stratum": "standards",
+   "query": "Which threat intelligence exchange protocol must be supported?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s5a78bf65b7e6",
+    "corrigendum-5.pdf::s26473c47baea"
+   ],
+   "requirement": "TAXII",
+   "provenance": "answer-suite cue 'TAXII', occurs in 2 sections",
+   "multi_bearer": true
+  },
+  {
+   "query_id": "L-01",
+   "stratum": "lexical_value",
+   "query": "What minimum IPsec VPN throughput must the firewall provide?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s17c0dd85dc0f"
+   ],
+   "requirement": "75 Gbps",
+   "provenance": "key value 'Minimum IPsec VPN Throughput' = 75 Gbps"
+  },
+  {
+   "query_id": "L-02",
+   "stratum": "lexical_value",
+   "query": "What pixel pitch is specified for the LED video wall?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s8a63a97488c5"
+   ],
+   "requirement": "1.23 mm",
+   "provenance": "key value 'Pixel Pitch' = 1.23 mm"
+  },
+  {
+   "query_id": "L-03",
+   "stratum": "lexical_value",
+   "query": "How many concurrent IPsec tunnels must the router support?",
+   "answer_sections": [
+    "corrigendum-5.pdf::sbe143058735c"
+   ],
+   "requirement": "2,500 tunnels",
+   "provenance": "key value 'Minimum concurrent IPsec tunnels' = 2,500"
+  },
+  {
+   "query_id": "L-04",
+   "stratum": "lexical_value",
+   "query": "What minimum usable capacity must the storage area network provide?",
+   "answer_sections": [
+    "corrigendum-5.pdf::sa0b7497e5d2b"
+   ],
+   "requirement": "75 TB",
+   "provenance": "key value 'Minimum usable capacity' = 75 TB"
+  },
+  {
+   "query_id": "L-05",
+   "stratum": "lexical_value",
+   "query": "What static load capacity must the cabinet withstand?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s3cd9cabe84d2"
+   ],
+   "requirement": "1500 Kg",
+   "provenance": "key value 'Static Load Capacity' = 1500 Kg"
+  },
+  {
+   "query_id": "L-06",
+   "stratum": "lexical_value",
+   "query": "What switching capacity is required for the Type-4 switch?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s3f7fbbb94708"
+   ],
+   "requirement": "36 Gbps",
+   "provenance": "key value 'Type-4 Switch Switching Capacity' = 36 Gbps"
+  },
+  {
+   "query_id": "L-07",
+   "stratum": "lexical_value",
+   "query": "How many different databases must the DAM solution support?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s5e9da02bf852"
+   ],
+   "requirement": "15 databases",
+   "provenance": "key value 'Minimum Database Support' = 15"
+  },
+  {
+   "query_id": "L-08",
+   "stratum": "lexical_value",
+   "query": "What refresh rate must the video wall achieve?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s8a63a97488c5"
+   ],
+   "requirement": "3840 Hz",
+   "provenance": "key value 'Refresh Rate' = 3840 Hz"
+  },
+  {
+   "query_id": "L-09",
+   "stratum": "lexical_value",
+   "query": "What data transfer rate must the data diode sustain?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s8eba9ec24e62"
+   ],
+   "requirement": "1000 Mbps",
+   "provenance": "key value 'Data Transfer rate' = 1000 Mbps"
+  },
+  {
+   "query_id": "L-10",
+   "stratum": "lexical_value",
+   "query": "What initial events per second must the NG-SIEM handle?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s5a78bf65b7e6"
+   ],
+   "requirement": "6000 EPS",
+   "provenance": "key value 'Initial Event per second' = 6000 EPS"
+  },
+  {
+   "query_id": "L-11",
+   "stratum": "lexical_value",
+   "query": "What packet capture throughput must the NBAD provide?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s10b955fac21b"
+   ],
+   "requirement": "1 Gbps",
+   "provenance": "key value 'Packet Capture Throughput' = 1 Gbps"
+  },
+  {
+   "query_id": "L-12",
+   "stratum": "lexical_value",
+   "query": "What ethernet TAP speed is specified?",
+   "answer_sections": [
+    "corrigendum-5.pdf::sbf593c59e11f"
+   ],
+   "requirement": "10/100/1000 Mbps",
+   "provenance": "key value 'Ethernet TAP Speed' = 10/100/1000 Mbps"
+  },
+  {
+   "query_id": "H-01",
+   "stratum": "hierarchy",
+   "query": "Which processor is specified for the nodes of the SOC and security analytics cluster?",
+   "answer_sections": [
+    "corrigendum-5.pdf::sec692d99b2dc"
+   ],
+   "requirement": "2 x Intel Xeon Platinum 8568Y+",
+   "provenance": "5.3 HCI-1 Node/Server Hardware and Software; the subject 'SOC and security analytics' is in the PARENT heading 5. HCI-1, not in 5.3's own. THREE OTHER SECTIONS NAME THE SAME PROCESSOR as a cross-reference (8. NBAD Central Infrastructure, 12. DAM Central Infrastructure, 17.2 HCI-2 Node/Server). 5.3 is the section that SPECIFIES it for this cluster and the others restate it for theirs, so the single answer stands -- but an arm landing on a restating section is a near miss rather than a blunder, and `near_bearers` records that judgement instead of leaving it to be discovered later.",
+   "near_bearers": [
+    "corrigendum-5.pdf::s46a5546fd7b8",
+    "corrigendum-5.pdf::s8fa8694d957f",
+    "corrigendum-5.pdf::sb5df7228e5d7"
+   ]
+  },
+  {
+   "query_id": "H-02",
+   "stratum": "hierarchy",
+   "query": "How much operational headroom must the SOC and security analytics cluster leave?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s6cdcc2fd0cb2"
+   ],
+   "requirement": "30 percent",
+   "provenance": "5.4 HCI-1 Sizing Requirements; subject in the parent heading"
+  },
+  {
+   "query_id": "H-03",
+   "stratum": "hierarchy",
+   "query": "How much memory is required per node in the NOC and infrastructure management cluster?",
+   "answer_sections": [
+    "corrigendum-5.pdf::sb5df7228e5d7"
+   ],
+   "requirement": "1 TB",
+   "provenance": "17.2 HCI-2 Node/Server Hardware and Software; subject in the parent heading 17. HCI-2"
+  },
+  {
+   "query_id": "H-04",
+   "stratum": "hierarchy",
+   "query": "How is the workload divided across the NOC and infrastructure management cluster?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s4a7722531e48"
+   ],
+   "requirement": "the HCI-2 workload allocation",
+   "provenance": "17.1 HCI-2 Workload Allocation; subject in the parent heading"
+  },
+  {
+   "query_id": "H-05",
+   "stratum": "hierarchy",
+   "query": "What availability and sizing applies to the NOC and infrastructure management cluster?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s3d77333060c9"
+   ],
+   "requirement": "30 percent operational headroom, HCI-2",
+   "provenance": "17.3 HCI-2 Availability and Sizing; subject in the parent heading"
+  },
+  {
+   "query_id": "H-06",
+   "stratum": "hierarchy",
+   "query": "Which licensing and storage terms apply to the SOC and security analytics cluster?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s6c9af4b0ec09"
+   ],
+   "requirement": "the HCI-1 licensing and storage terms",
+   "provenance": "5.5 HCI-1 Licensing and Storage; subject in the parent heading"
+  },
+  {
+   "query_id": "H-07",
+   "stratum": "hierarchy",
+   "query": "What independence requirement applies to the SOC and security analytics platform?",
+   "answer_sections": [
+    "corrigendum-5.pdf::sd49339618367"
+   ],
+   "requirement": "independence and availability of HCI-1",
+   "provenance": "5.1 Independence and Availability; subject in the parent heading"
+  },
+  {
+   "query_id": "M-01",
+   "stratum": "semantic_mismatch",
+   "query": "What must happen if someone fails to sign in three times within five minutes?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s5e9da02bf852"
+   ],
+   "requirement": "failed logon alert threshold: 3 failed logons within 5 minutes",
+   "provenance": "hand-written; the document says 'failed logon' and 'alert threshold', the query says 'fails to sign in'"
+  },
+  {
+   "query_id": "M-02",
+   "stratum": "semantic_mismatch",
+   "query": "How far must the enclosure's hinged front be able to swing?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s3cd9cabe84d2"
+   ],
+   "requirement": "door opening angle 130 degrees",
+   "provenance": "hand-written; the document says 'Door Opening Angle' and its heading says 'Cabinet/Rack', the query says 'enclosure' and 'hinged front ... swing'. The first wording said 'cabinet' and overlapped the ToC, which the gold check caught."
+  },
+  {
+   "query_id": "M-03",
+   "stratum": "semantic_mismatch",
+   "query": "What electrostatic discharge protection must the router's contacts withstand?",
+   "answer_sections": [
+    "corrigendum-5.pdf::sbe143058735c"
+   ],
+   "requirement": "6 kV ESD protection, contact",
+   "provenance": "hand-written; the document uses the acronym ESD, the query spells it out"
+  },
+  {
+   "query_id": "M-04",
+   "stratum": "semantic_mismatch",
+   "query": "How cold can the one-way transfer device get before it stops operating?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s8eba9ec24e62"
+   ],
+   "requirement": "operating temperature -40 C to +70 C",
+   "provenance": "hand-written; the document says 'Data Diode', the query says 'one-way transfer device'"
+  },
+  {
+   "query_id": "M-05",
+   "stratum": "semantic_mismatch",
+   "query": "Which standard covers the physical dimensions of the equipment enclosure?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s3cd9cabe84d2"
+   ],
+   "requirement": "IEC 60297",
+   "provenance": "hand-written; the document says 'Cabinet/Rack', the query says 'equipment enclosure'"
+  },
+  {
+   "query_id": "M-06",
+   "stratum": "semantic_mismatch",
+   "query": "What certification must the industrial security gateway hold?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s8eba9ec24e62"
+   ],
+   "requirement": "IEC 62443-4-2",
+   "provenance": "hand-written; the document says 'Data Diode', the query says 'industrial security gateway'"
+  },
+  {
+   "query_id": "M-07",
+   "stratum": "semantic_mismatch",
+   "query": "How large must a bidder's business have been in recent years to be eligible?",
+   "answer_sections": [
+    "corrigendum-5.pdf::sfd9ca52ef13b"
+   ],
+   "requirement": "minimum average annual turnover Rs. 19.44 Crores",
+   "provenance": "hand-written; the document says 'Minimum Average Annual Turnover', the query avoids all three words"
+  },
+  {
+   "query_id": "M-08",
+   "stratum": "semantic_mismatch",
+   "query": "What privacy obligation applies to the database activity monitoring solution?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s5e9da02bf852"
+   ],
+   "requirement": "GDPR",
+   "provenance": "hand-written; the document says 'DAM' and 'GDPR', the query expands the acronym and says 'privacy obligation'"
+  },
+  {
+   "query_id": "M-09",
+   "stratum": "semantic_mismatch",
+   "query": "How long after acceptance must the supplier keep issuing software fixes?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s26473c47baea",
+    "corrigendum-5.pdf::s406b637d27c8",
+    "corrigendum-5.pdf::sbf593c59e11f"
+   ],
+   "requirement": "support for patches and upgradation, 5 years",
+   "provenance": "hand-written; the document says 'Support for Patches and Upgradation' and 'from UAT', the query says 'software fixes' and 'after acceptance'",
+   "multi_bearer": true
+  },
+  {
+   "query_id": "M-10",
+   "stratum": "semantic_mismatch",
+   "query": "What spare capacity must be left for future growth in the main analytics platform?",
+   "answer_sections": [
+    "corrigendum-5.pdf::s6cdcc2fd0cb2"
+   ],
+   "requirement": "minimum operational headroom 30 percent",
+   "provenance": "hand-written; the document says 'operational headroom', the query says 'spare capacity ... future growth'"
+  }
+ ]
+}

@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "sovereign-node.fullname" . }}
+  labels:
+    {{- include "sovereign-node.labels" . | nindent 4 }}
+spec:
+  # ClusterIP only — the libp2p port is reachable inside the cluster to peer nodes (and only
+  # them, per the NetworkPolicy). NEVER expose this via a LoadBalancer/NodePort; federation
+  # traffic must stay on the internal mesh (data sovereignty).
+  type: ClusterIP
+  selector:
+    {{- include "sovereign-node.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: libp2p
+      port: {{ .Values.listenPort }}
+      targetPort: libp2p
+      protocol: TCP
+    {{- if .Values.controlListen }}
+    # Loopback/intranet control API — this dept's OWN rag-api drives OUTBOUND federated
+    # queries via POST :7070/federate. Reachable only from rag-api per the NetworkPolicy.
+    - name: control
+      port: 7070
+      targetPort: control
+      protocol: TCP
+    {{- end }}

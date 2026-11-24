@@ -1,0 +1,18 @@
+apiVersion: v2
+name: ragaas
+description: >-
+  Federated RAG — sovereign, multi-tenant, air-gap-capable Agentic RAG-as-a-Service.
+  One release = one DEPARTMENT's fully isolated stack (control-plane API + console + its
+  own vector/sparse/object/metadata stores + optional self-hosted models) plus its libp2p
+  federation node (the sovereign-node subchart). Departmental isolation is enforced at the
+  cluster level by NetworkPolicies; cross-department retrieval is grant-authorised over the
+  mesh, never by opening the network. Deploy once per department namespace.
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+
+dependencies:
+  - name: sovereign-node
+    version: "0.0.0"
+    repository: "file://sovereign-node"
+    condition: sovereign-node.enabled

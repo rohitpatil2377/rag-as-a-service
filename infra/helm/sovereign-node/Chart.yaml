@@ -1,0 +1,10 @@
+apiVersion: v2
+name: sovereign-node
+description: >-
+  Federated RAG per-department federation node — one libp2p peer per department, deployed
+  standalone (one release per dept) so cross-department data sovereignty is enforced by
+  strict NetworkPolicy isolation, not trust. Fronts that department's local rag-api and
+  answers a peer's federated query ONLY when the peer holds an active cryptographic grant.
+type: application
+version: 0.0.0
+appVersion: "0.1.0-phase1"

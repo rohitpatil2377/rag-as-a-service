@@ -1,0 +1,30 @@
+{
+  "$comment": "RAGAS golden ground-truth for the CI eval gate (FR-G5). Answers are grounded in platform_brief. `expect_abstain` items verify the grounded-or-abstain gate (FR-E2).",
+  "doc_id": "platform_brief",
+  "items": [
+    {
+      "question": "What is the platform's uptime target?",
+      "expected_answer": "99.5 percent baseline and 99.9 percent at peak",
+      "expected_doc_ids": ["platform_brief"],
+      "expect_abstain": false
+    },
+    {
+      "question": "What is the P95 query latency target?",
+      "expected_answer": "3 seconds or less",
+      "expected_doc_ids": ["platform_brief"],
+      "expect_abstain": false
+    },
+    {
+      "question": "How does the platform combine search methods?",
+      "expected_answer": "dense vector search and BM25 fused with reciprocal rank fusion",
+      "expected_doc_ids": ["platform_brief"],
+      "expect_abstain": false
+    },
+    {
+      "question": "What is the boiling point of helium on Jupiter?",
+      "expected_answer": "",
+      "expected_doc_ids": [],
+      "expect_abstain": true
+    }
+  ]
+}

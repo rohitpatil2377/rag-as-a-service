@@ -1,0 +1,34 @@
+[project]
+name = "rag-clients"
+version = "0.0.0"
+description = "RAG as a Service — concrete adapters implementing rag-core Protocols (Qdrant, OpenSearch, MinIO, Postgres, TEI, vLLM)."
+requires-python = ">=3.11"
+dependencies = [
+    "rag-common",
+    "rag-schemas",
+    "rag-core",
+    "httpx>=0.27",
+    "qdrant-client>=1.9",
+    "opensearch-py[async]>=2.6",
+    "minio>=7.2",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.1",
+    "alembic>=1.13",
+]
+
+# Azure Blob Storage as an external document source. An EXTRA, not a core dependency: the SDK is
+# imported lazily inside the fetcher, and a deployment that never pulls from Azure should not
+# carry it. Install with `uv sync --extra azure` (or add rag-clients[azure]).
+[project.optional-dependencies]
+azure = ["azure-storage-blob>=12.30"]
+# RDKit for chemical SMILES canonicalization (Slice 6, Phase C). An EXTRA, NOT a core dependency:
+# it is a heavy C++ toolkit imported lazily inside RDKitMoleculeNormalizer, and CI must not install
+# it (the feature is fail-safe without it). Install with `uv sync --extra chem` (rag-clients[chem]).
+chem = ["rdkit>=2024.3.1"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rag_clients"]

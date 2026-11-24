@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "ragaas": {
+      "command": "rag-mcp",
+      "env": {
+        "RAG_MCP_TENANT": "<TENANT>",
+        "RAG_MCP_TOKEN": "<PLATFORM_JWT_OR_API_KEY>"
+      }
+    }
+  }
+}

@@ -1,0 +1,304 @@
+{
+  "kb": "acme__research",
+  "repeat": 3,
+  "top_k": null,
+  "questions": 24,
+  "score": 0.9583,
+  "answerable_score": 0.95,
+  "refusal_score": 1.0,
+  "errors": 0,
+  "flaky": [],
+  "failing": [
+    "According to the SOP Writing Guidance Pharma document, who authorizes an SOP?"
+  ],
+  "rows": [
+    {
+      "question": "According to the SOP Writing Guidance Pharma document, who prepares and executes an SOP?",
+      "expected": "Executive",
+      "pass_rate": 1.0,
+      "statuses": [
+        "grounded",
+        "grounded",
+        "grounded"
+      ],
+      "faithfulness": 1.0,
+      "errors": 0
+    },
+    {
+      "question": "According to the SOP Writing Guidance Pharma document, who approves an SOP?",
+      "expected": "Asst. Manager",
+      "pass_rate": 1.0,
+      "statuses": [
+        "grounded",
+        "grounded",
+        "grounded"
+      ],
+      "faithfulness": 1.0,
+      "errors": 0
+    },
+    {
+      "question": "According to the SOP Writing Guidance Pharma document, who authorizes an SOP?",
+      "expected": "Asst. General Manager",
+      "pass_rate": 0.0,
+      "statuses": [
+        "grounded",
+        "grounded",
+        "grounded"
+      ],
+      "faithfulness": 0.611,
+      "errors": 0
+    },
+    {
+      "question": "In the SOP Writing Guidance Pharma document, who is accountable under section 4.0?",
+      "expected": "Head of the Concerned Department",
+      "pass_rate": 1.0,
+      "statuses": [
+        "grounded",
+        "grounded",
+        "grounded"
+      ],
+      "faithfulness": 1.0,
+      "errors": 0
+    },
+    {
+      "question": "What font must the contents of an SOP use?",
+      "expected": "Times New Roman",
+      "pass_rate": 1.0,
+      "statuses": [
+        "grounded",
+        "grounded",
+        "grounded"
+      ],
+      "faithfulness": 1.0,
+      "errors": 0
+    },
+    {
+      "question": "What font size is used for the write up of the SOP?",
+      "expected": "12",
+      "pass_rate": 1.0,
+      "statuses": [
+        "grounded",
+        "grounded",
+        "grounded"
+      ],
+      "faithfulness": 1.0,
+      "errors": 0
+    },
+    {
+      "question": "What paper size should an SOP be prepared on?",
+      "expected": "A-4",
+      "pass_rate": 1.0,
+      "statuses": [
+        "grounded",
+        "grounded",
+        "grounded"
+      ],
+      "faithfulness": 1.0,
+      "errors": 0
+    },
+    {
+      "question": "What are the dimensions of the logo on the right hand corner?",
+      "expected": "30 mm",
+      "pass_rate": 1.0,
+      "statuses": [
+        "grounded",
+        "grounded",
+        "grounded"
+      ],
+      "faithfulness": 1.0,
+      "errors": 0
+    },
+    {
+      "question": "What is the department code for Quality Control?",
+      "expected": "Q",
+      "pass_rate": 1.0,
+      "statuses": [
+        "grounded",
+        "grounded",
+        "grounded"
+      ],
+      "faithfulness": 1.0,
+      "errors": 0
+    },
+    {
+      "question": "What is the department code for Engineering?",
+      "expected": "E",
+      "pass_rate": 1.0,
+      "statuses": [
+        "grounded",
+        "grounded",
+        "grounded"
+      ],
+      "faithfulness": 1.0,
+      "errors": 0
+    },
+    {
+      "question": "What is the department code for Tablets?",
+      "expected": "T",
+      "pass_rate": 1.0,
+      "statuses": [
+        "grounded",
+        "grounded",
+        "grounded"
+      ],
+      "faithfulness": 1.0,
+      "errors": 0
+    },
+    {
+      "question": "What is the title of PBSOP006?",
+      "expected": "Radioactive Material Handling",
+      "pass_rate": 1.0,
+      "statuses": [
+        "grounded",
+        "grounded",
+        "grounded"
+      ],
+      "faithfulness": 1.0,
+      "errors": 0
+    },
+    {
+      "question": "When was revision 1 of PBSOP006 completed?",
+      "expected": "05-Dec-17",
+      "pass_rate": 1.0,
+      "statuses": [
+        "grounded",
+        "grounded",
+        "grounded"
+      ],
+      "faithfulness": 1.0,
+      "errors": 0
+    },
+    {
+      "question": "Which sections were updated in revision 1 of PBSOP006?",
+      "expected": "5.4",
+      "pass_rate": 1.0,
+      "statuses": [
+        "grounded",
+        "grounded",
+        "grounded"
+      ],
+      "faithfulness": 1.0,
+      "errors": 0
+    },
+    {
+      "question": "Which SOP covers mercury spills?",
+      "expected": "PBSOP010",
+      "pass_rate": 1.0,
+      "statuses": [
+        "grounded",
+        "grounded",
+        "grounded"
+      ],
+      "faithfulness": 1.0,
+      "errors": 0
+    },
+    {
+      "question": "Which SOP covers emergency response and first aid?",
+      "expected": "PBSOP003",
+      "pass_rate": 1.0,
+      "statuses": [
+        "grounded",
+        "grounded",
+        "grounded"
+      ],
+      "faithfulness": 1.0,
+      "errors": 0
+    },
+    {
+      "question": "What is the title of PBSOP008?",
+      "expected": "Electrical Safety",
+      "pass_rate": 1.0,
+      "statuses": [
+        "grounded",
+        "grounded",
+        "grounded"
+      ],
+      "faithfulness": 1.0,
+      "errors": 0
+    },
+    {
+      "question": "Which radiation safety training courses does the OEHS offer?",
+      "expected": "Radiation Protection Training",
+      "pass_rate": 1.0,
+      "statuses": [
+        "grounded",
+        "grounded",
+        "grounded"
+      ],
+      "faithfulness": 1.0,
+      "errors": 0
+    },
+    {
+      "question": "What is the objective stated in the SOP Writing Guidance Pharma document?",
+      "expected": "preparation",
+      "pass_rate": 1.0,
+      "statuses": [
+        "grounded",
+        "grounded",
+        "grounded"
+      ],
+      "faithfulness": 1.0,
+      "errors": 0
+    },
+    {
+      "question": "What is the scope of the SOP on SOPs?",
+      "expected": "applicable to all",
+      "pass_rate": 1.0,
+      "statuses": [
+        "grounded",
+        "grounded",
+        "grounded"
+      ],
+      "faithfulness": 1.0,
+      "errors": 0
+    },
+    {
+      "question": "How many tiers does the escalation matrix have?",
+      "expected": null,
+      "pass_rate": 1.0,
+      "statuses": [
+        "abstained",
+        "abstained",
+        "abstained"
+      ],
+      "faithfulness": null,
+      "errors": 0
+    },
+    {
+      "question": "What is the annual leave entitlement for employees?",
+      "expected": null,
+      "pass_rate": 1.0,
+      "statuses": [
+        "abstained",
+        "abstained",
+        "abstained"
+      ],
+      "faithfulness": null,
+      "errors": 0
+    },
+    {
+      "question": "What is the penalty for a radiation safety violation?",
+      "expected": null,
+      "pass_rate": 1.0,
+      "statuses": [
+        "abstained",
+        "abstained",
+        "abstained"
+      ],
+      "faithfulness": null,
+      "errors": 0
+    },
+    {
+      "question": "What is the CEO's salary?",
+      "expected": null,
+      "pass_rate": 1.0,
+      "statuses": [
+        "abstained",
+        "abstained",
+        "abstained"
+      ],
+      "faithfulness": null,
+      "errors": 0
+    }
+  ]
+}

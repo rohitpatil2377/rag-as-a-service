@@ -1,0 +1,56 @@
+{{- if .Values.networkPolicy.enabled }}
+# =============================================================================================
+# Whole-namespace egress lockdown — the department cannot exfiltrate to the internet.
+#
+# The chart already locks rag-api egress (rag-api-egress). This closes the remaining hole:
+# STORES and the CONSOLE could still reach the internet. After this, EVERY app pod in the
+# department namespace may egress ONLY intra-namespace + DNS + the observability plane — there
+# is no route to any external host, so an injection-driven or dependency phone-home exfil has
+# nowhere to go. Confidence is "no route", enforced at the network, not model behaviour.
+#
+# The sovereign-node is EXCLUDED: it carries its own stricter Ingress+Egress policy; a
+# namespace-wide intra-namespace allow would broaden it, so we leave it untouched.
+# =============================================================================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Values.department }}-namespace-egress
+  labels:
+    {{- include "rag.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: NotIn
+        values: ["sovereign-node"]
+  policyTypes: [Egress]
+  egress:
+    # 1) Intra-namespace only (stores, models, api, console, node).
+    - to:
+        - podSelector: {}
+    # 2) DNS to the in-cluster resolver (no external DNS = no external name to exfil to).
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    # 3) Observability plane (OTel collector) — parity with rag-api-egress.
+    - to:
+        - namespaceSelector:
+            matchLabels: { rag.local/plane: observability }
+    {{- if eq (include "rag.linkerdEnabled" .) "true" }}
+    # 4) linkerd control plane (identity 8080 / destination 8086 / policy 8090). EVERY meshed pod in
+    #    this namespace (api, console) needs its sidecar to reach the control plane; without this the
+    #    namespace-wide egress lockdown would strand the proxies. Peer-proxy 4143 mTLS is
+    #    intra-namespace and already covered by rule (1). Unmeshed stores ignore this rule.
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: linkerd }
+      ports:
+        - { protocol: TCP, port: 8080 }
+        - { protocol: TCP, port: 8086 }
+        - { protocol: TCP, port: 8090 }
+    {{- end }}
+  # No 0.0.0.0/0, no public host: the internet is unreachable for every selected pod.
+{{- end }}

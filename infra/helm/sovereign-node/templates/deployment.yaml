@@ -1,0 +1,113 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sovereign-node.fullname" . }}
+  labels:
+    {{- include "sovereign-node.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate   # single stable identity: never run two pods sharing the same key PVC
+  selector:
+    matchLabels:
+      {{- include "sovereign-node.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sovereign-node.labels" . | nindent 8 }}
+      {{- if or .Values.linkerd.enabled (dig "linkerd" "enabled" false (.Values.global | default dict)) }}
+      annotations:
+        # Mesh this node: linkerd injects an mTLS sidecar. libp2p (4001) + the control API
+        # (7070) are NOT HTTP, so mark them opaque -> linkerd does transparent TCP mTLS
+        # between meshed peer proxies instead of trying to parse them as HTTP.
+        linkerd.io/inject: enabled
+        config.linkerd.io/opaque-ports: "{{ .Values.listenPort }},7070"
+      {{- end }}
+    spec:
+      containers:
+        - name: sovereign-node
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # Flag-driven binary; exec via sh -c so the rag-api bearer stays in env/Secret, not argv.
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              exec sovereign-node \
+                --dept={{ required "department is required (.Values.department)" .Values.department }} \
+                --listen=/ip4/0.0.0.0/tcp/{{ .Values.listenPort }} \
+                --rag-url={{ .Values.ragUrl }} \
+                {{- if .Values.controlListen }}
+                --control-listen={{ .Values.controlListen }} \
+                {{- end }}
+                {{- if .Values.registry.enabled }}
+                --registry=/etc/sovereign/registry/registry.json \
+                {{- end }}
+                {{- if .Values.bootstrapPeers }}
+                --bootstrap={{ join "," .Values.bootstrapPeers }} \
+                {{- end }}
+                {{- if .Values.persistence.enabled }}
+                --key=/data/node.key \
+                {{- else if or .Values.identity.keyPem .Values.identity.secretName }}
+                --key=/etc/sovereign/identity/node.key \
+                {{- end }}
+                {{- if .Values.devSecret }}
+                --dev-secret={{ .Values.devSecret }} \
+                {{- end }}
+                {{- if .Values.ragToken.secretName }}
+                --rag-token="$SOVEREIGN_RAG_TOKEN" \
+                {{- end }}
+                --replay-skew-seconds={{ .Values.replaySkewSeconds | default 120 }}
+          env:
+            {{- if .Values.ragToken.secretName }}
+            - name: SOVEREIGN_RAG_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.ragToken.secretName }}
+                  key: {{ .Values.ragToken.secretKey | default "token" }}
+            {{- end }}
+          ports:
+            - name: libp2p
+              containerPort: {{ .Values.listenPort }}
+              protocol: TCP
+            {{- if .Values.controlListen }}
+            - name: control
+              containerPort: 7070
+              protocol: TCP
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            {{- if .Values.persistence.enabled }}
+            - name: data
+              mountPath: /data
+            {{- end }}
+            {{- if or .Values.identity.keyPem .Values.identity.secretName }}
+            - name: identity
+              mountPath: /etc/sovereign/identity
+              readOnly: true
+            {{- end }}
+            {{- if .Values.registry.enabled }}
+            - name: registry
+              mountPath: /etc/sovereign/registry
+              readOnly: true
+            {{- end }}
+      volumes:
+        {{- if or .Values.identity.keyPem .Values.identity.secretName }}
+        - name: identity
+          secret:
+            secretName: {{ include "sovereign-node.identitySecretName" . }}
+            items:
+              - key: node.key
+                path: node.key
+        {{- end }}
+        {{- if .Values.registry.enabled }}
+        - name: registry
+          configMap:
+            name: {{ .Values.registry.configMapName | default (printf "%s-registry" (include "sovereign-node.fullname" .)) }}
+            optional: true
+        {{- end }}
+      {{- if .Values.persistence.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "sovereign-node.fullname" . }}-data
+      {{- end }}

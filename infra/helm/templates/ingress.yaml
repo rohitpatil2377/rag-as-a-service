@@ -1,0 +1,65 @@
+{{- if .Values.ingress.enabled }}
+# =============================================================================================
+# External entry point (OPTIONAL, default OFF — set ingress.enabled=true to render this).
+#
+# The console (nginx) is the SINGLE public surface: it serves the SPA AND reverse-proxies /v1,
+# /health, /api (Swagger) to the api on the SAME origin (see apps/console/nginx.conf). So external
+# access = an Ingress to the CONSOLE Service; the api is reached THROUGH the console proxy, never
+# exposed directly — the sovereign default. `ingress.exposeApi` (default OFF) can additionally route
+# /v1 + /api straight to the api Service for callers that want to bypass the console proxy.
+#
+# When OFF the render is byte-identical to a no-ingress deploy (mirrors global.linkerd.enabled).
+# =============================================================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rag-console
+  labels:
+    {{- include "rag.labels" . | nindent 4 }}
+    app.kubernetes.io/name: rag-console
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className | quote }}
+  {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+      secretName: {{ .Values.ingress.tls.secretName | quote }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          {{- if .Values.ingress.exposeApi }}
+          # OPTIONAL direct-to-api routes (default OFF). These bypass the console's nginx proxy and
+          # hit the api Service directly — for machine callers that don't want the SPA in the path.
+          # Listed FIRST so the more-specific /v1 + /api prefixes win over the console catch-all.
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: rag-api
+                port:
+                  number: {{ .Values.api.service.port }}
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: rag-api
+                port:
+                  number: {{ .Values.api.service.port }}
+          {{- end }}
+          # Everything else -> the console (SPA + its same-origin /v1,/health,/api,/mcp proxy).
+          - path: {{ .Values.ingress.path | quote }}
+            pathType: {{ .Values.ingress.pathType | quote }}
+            backend:
+              service:
+                name: rag-console
+                port:
+                  number: {{ .Values.console.service.port }}
+{{- end }}

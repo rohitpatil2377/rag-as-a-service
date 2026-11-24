@@ -1,0 +1,15 @@
+{{- if .Values.qualityPatch.enabled }}
+# Overlay a fixed control-plane source file over the (older) baked image, so a fresh
+# helm install is self-contained without an image rebuild. Currently ships the RAGAS-wired
+# quality.py (adds answer_relevancy/context_precision/context_recall to eval + null-coercion
+# that stops the console .toFixed() blank-screen crash). Remove once the api image is rebuilt.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rag-api-quality-patch
+  labels:
+    {{- include "rag.labels" . | nindent 4 }}
+data:
+  quality.py: |-
+{{ .Files.Get "files/source-patches/quality.py" | indent 4 }}
+{{- end }}

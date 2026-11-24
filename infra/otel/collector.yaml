@@ -1,0 +1,30 @@
+# OpenTelemetry Collector — dev config (open standard, no lock-in).
+# Receives OTLP from the API, exposes metrics for Prometheus to scrape, and would
+# forward traces to Tempo + bridge into the AIOps platform in prod (TDD §4.8).
+receivers:
+  otlp:
+    protocols:
+      grpc: { endpoint: 0.0.0.0:4317 }
+
+processors:
+  batch: {}
+  resource:
+    attributes:
+      - { key: platform, value: ragaas, action: upsert }
+
+exporters:
+  prometheus:
+    endpoint: 0.0.0.0:8889
+  debug:
+    verbosity: normal
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [debug]        # TODO(prod): tempo/AIOps bridge
+    metrics:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [prometheus]

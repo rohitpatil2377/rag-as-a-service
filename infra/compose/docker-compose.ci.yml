@@ -1,0 +1,81 @@
+# Isolated, disposable REAL-STORE CI stack for the phase-MAD worktree.
+# Separate project name + remapped host ports + fresh volumes => ZERO impact on the shared
+# ragaas-dev stack. Only the stores + CPU model servers the real-store suite needs.
+# Tear down with: docker compose -f infra/compose/docker-compose.ci.yml down -v
+name: ragaas-ci
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.18.0
+    ports: ["127.0.0.1:16333:6333"]
+    volumes: ["qdrant-data:/qdrant/storage"]
+    mem_limit: 2g
+
+  opensearch:
+    image: opensearchproject/opensearch:2.17.1
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx1g
+    ports: ["127.0.0.1:19200:9200"]
+    volumes: ["opensearch-data:/usr/share/opensearch/data"]
+    mem_limit: 2g
+
+  # S3 from SeaweedFS, not the MinIO server image — MinIO withdrew their public images, so the
+  # pinned tag cannot be pulled. Same reasoning and same credentials as docker-compose.dev.yml;
+  # the service name stays `minio` because it is the hostname in ci.env.
+  minio:
+    image: chrislusf/seaweedfs:latest
+    command: >
+      server -dir=/data -s3 -s3.port=9000 -s3.config=/etc/seaweedfs/s3.json
+      -master.volumeSizeLimitMB=1024 -volume.max=0 -ip=minio
+    ports: ["127.0.0.1:19000:9000"]
+    volumes:
+      - "minio-data:/data"
+      - "./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro"
+    mem_limit: 1g
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=rag
+      - POSTGRES_PASSWORD=rag
+      - POSTGRES_DB=rag
+    ports: ["127.0.0.1:15432:5432"]
+    volumes: ["pg-data:/var/lib/postgresql/data"]
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  tei:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    command: ["--model-id", "BAAI/bge-small-en-v1.5"]
+    ports: ["127.0.0.1:18080:80"]
+    volumes: ["tei-cache:/data"]
+    mem_limit: 2g
+
+  reranker:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    command: ["--model-id", "cross-encoder/ms-marco-MiniLM-L-6-v2", "--max-client-batch-size", "64"]
+    ports: ["127.0.0.1:18083:80"]
+    volumes: ["reranker-cache:/data"]
+    mem_limit: 2g
+
+  nli-checker:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    command: ["--model-id", "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7"]
+    ports: ["127.0.0.1:18085:80"]
+    volumes: ["nli-cache:/data"]
+    mem_limit: 3g
+
+volumes:
+  qdrant-data:
+  opensearch-data:
+  minio-data:
+  pg-data:
+  tei-cache:
+  reranker-cache:
+  nli-cache:

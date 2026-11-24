@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Run the repo's own gate before anything leaves this machine.
+#
+# WHY THIS EXISTS. The GitLab remote runs NO pipeline -- the only CI config is a GitHub workflow
+# gated on `push: branches: [main]` and `pull_request`, neither of which fires for a push of a
+# feature branch to GitLab. So local discipline is not a backstop for CI here; it IS the gate.
+#
+# And it failed, twice in one afternoon, the same way both times: the gate was run NARROWER than
+# the repo. `mypy libs services apps` missed `sdks/python`, and `ruff check libs services apps`
+# misses the repo-root `tests/` directory entirely -- so two e2e test files were pushed having
+# never been linted, and spec tests referencing attributes that did not exist went out with mypy
+# red. `make ci` had the right scope all along (`libs services apps sdks/python`, and `.` for
+# ruff). It simply was not the thing being run.
+#
+# A test that is never executed protects nothing. This makes the full-scope gate the default
+# rather than something to remember.
+#
+# Install with `make hooks`. Bypass for a genuine emergency with `git push --no-verify`, which is
+# deliberately explicit and shows up in a shell history.
+set -euo pipefail
+
+# WHAT THIS DOES NOT COVER, said here so a green hook is not mistaken for a complete gate.
+# `make test` is `pytest -m "not integration and not e2e and not eval"`, so `make ci` runs the
+# 2,799 unit tests and EXCLUDES the 394 e2e ones -- which the GitHub `quality` job excludes too.
+# They need no infrastructure (in-memory profile, ~8 min), so they are simply not in any automated
+# gate at all today. Before claiming work is done, also run:
+#
+#     uv run pytest -q -m "e2e"                                  # 394, no infra needed
+#     uv run pytest -q -m "integration"                           # 107, needs `make up`
+#
+# This hook is the cheap part that catches the two failures that actually happened. It is not the
+# whole gate, and it is a LOCAL safeguard rather than enforcement: it needs `make hooks` in every
+# clone, `--no-verify` bypasses it, and the GitLab remote runs no pipeline of its own. A native
+# `.gitlab-ci.yml` running this same target, with a branch policy requiring it, is the real fix.
+echo "pre-push: running 'make ci' (ruff over the whole repo, mypy strict, 2,799 unit tests)"
+echo "pre-push: note this does NOT include the 394 e2e tests -- run those separately"
+if ! make ci; then
+    cat <<'MSG'
+
+pre-push: BLOCKED — `make ci` failed.
+
+Fix it, or push with `--no-verify` if you genuinely mean to. Note that the GitLab remote runs no
+pipeline, so nothing downstream will catch what you skip here.
+MSG
+    exit 1
+fi
+echo "pre-push: gate green"

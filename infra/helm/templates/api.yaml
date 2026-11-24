@@ -1,0 +1,232 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-api
+  labels:
+    {{- include "rag.labels" . | nindent 4 }}
+    app.kubernetes.io/name: rag-api
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rag-api
+  template:
+    metadata:
+      labels:
+        {{- include "rag.labels" . | nindent 8 }}
+        app.kubernetes.io/name: rag-api
+      {{- if eq (include "rag.linkerdEnabled" .) "true" }}
+      annotations:
+        # Mesh the api: linkerd injects an mTLS sidecar. The api SERVES HTTP on 8000, so that port
+        # is meshed NORMALLY (L7 mTLS + metrics) and is deliberately NOT opaque. opaque-ports lists
+        # the NON-HTTP ports this proxy connects out to so linkerd skips HTTP protocol detection and
+        # does transparent TCP mTLS instead:
+        #   7070 = the sovereign-node control API (the api dials it for outbound /federate) — the
+        #          node also declares 7070 opaque on its own side (server), this is the client twin.
+        #   5432 = postgres wire (server-speaks-first): protocol detection would hang it. Stores are
+        #          UNMESHED (see stores.yaml note), so the api proxy makes the outbound connection;
+        #          5432 is in linkerd's default opaque set already — listed here for explicitness.
+        linkerd.io/inject: enabled
+        config.linkerd.io/opaque-ports: "7070,5432"
+      {{- end }}
+    spec:
+      # Do NOT inject the legacy Docker-link env vars (API_PORT=tcp://… etc.) for in-namespace
+      # Services — they collide with the app's own RAG_*/api_port settings and break config parsing.
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001            # the image's numeric rag uid (k8s can't verify a NAMED user)
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: {{ include "rag.apiImage" . | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.api.service.port }}
+          envFrom:
+            - configMapRef:
+                name: rag-api-config
+            - secretRef:
+                name: rag-api-secrets
+          # Startup can be slow (Python + ML deps + store connect); give it up to ~5 min before
+          # liveness/readiness kick in, so a heavy cold start is never killed mid-boot.
+          startupProbe:
+            httpGet: { path: /livez, port: http }
+            periodSeconds: 5
+            failureThreshold: 60
+          # Liveness = process only (a store blip must not restart-loop the pod); readiness =
+          # store reachability (shed traffic without a restart, rejoin when the store returns).
+          livenessProbe:
+            httpGet: { path: /livez, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          # Writable scratch on an otherwise read-only root fs (uv cache + /tmp).
+          volumeMounts:
+            - { name: cache, mountPath: /home/rag/.cache }
+            - { name: tmp, mountPath: /tmp }
+            {{- if .Values.qualityPatch.enabled }}
+            - name: quality-patch
+              mountPath: /app/services/control-plane/src/svc_control_plane/quality.py
+              subPath: quality.py
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - { name: cache, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
+        {{- if .Values.qualityPatch.enabled }}
+        - name: quality-patch
+          configMap: { name: rag-api-quality-patch }
+        {{- end }}
+---
+# The console's nginx proxies to upstream "api" — expose the API under that name too (alias).
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  labels:
+    {{- include "rag.labels" . | nindent 4 }}
+    app.kubernetes.io/name: rag-api
+spec:
+  selector:
+    app.kubernetes.io/name: rag-api
+  ports:
+    - name: http
+      port: {{ .Values.api.service.port }}
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rag-api
+  labels:
+    {{- include "rag.labels" . | nindent 4 }}
+    app.kubernetes.io/name: rag-api
+spec:
+  selector:
+    app.kubernetes.io/name: rag-api
+  ports:
+    - name: http
+      port: {{ .Values.api.service.port }}
+      targetPort: http
+{{- if .Values.api.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: rag-api
+  labels:
+    {{- include "rag.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: rag-api
+  minReplicas: {{ .Values.api.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.api.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.api.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: rag-api
+  labels:
+    {{- include "rag.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rag-api
+{{- if .Values.networkPolicy.enabled }}
+---
+# Sovereignty control (enforced twin of RAG_SOVEREIGN_ENFORCE): the API may egress ONLY to
+# in-cluster stores + self-hosted models + DNS + the OTel collector — never to a foreign endpoint.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rag-api-egress
+  labels:
+    {{- include "rag.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: rag-api
+  policyTypes: ["Egress"]
+  egress:
+    # In-cluster stores + self-hosted models (label these pods rag.local/store="true").
+    - to:
+        - podSelector:
+            matchLabels:
+              rag.local/store: "true"
+    # DNS
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # OTel collector (observability plane)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              rag.local/plane: observability
+    {{- if .Values.observability.enabled }}
+    # In-chart observability sub-stack (observability.enabled): the api exports OTLP to the
+    # same-namespace otel-collector on 4317. Gated so the render is unchanged when it's off.
+    - to:
+        - podSelector:
+            matchLabels:
+              rag.local/observability: "true"
+      ports:
+        - { protocol: TCP, port: 4317 }
+    {{- end }}
+    {{- if eq (include "rag.linkerdEnabled" .) "true" }}
+    # linkerd: the api's mesh proxy must reach the control plane (identity 8080, destination 8086,
+    # policy 8090) in the `linkerd` namespace, or the default-deny egress would strand the sidecar
+    # and every request would fail. Mirrors the sovereign-node netpol's linkerd rule. Peer-proxy
+    # (4143) reachability is intra-namespace and already granted by the namespace-egress policy.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: linkerd
+      ports:
+        - { protocol: TCP, port: 8080 }
+        - { protocol: TCP, port: 8086 }
+        - { protocol: TCP, port: 8090 }
+    {{- end }}
+    {{- /* Explicit egress to sovereign endpoints OUTSIDE the cluster (e.g. a GPU vLLM on a
+           separate node in the SAME sovereign boundary). Each entry is a single internal
+           CIDR + port — never 0.0.0.0/0. Empty by default (fully in-cluster). This is the
+           network-layer twin of the host being on RAG_ALLOWED_EGRESS_HOSTS. */}}
+    {{- range .Values.api.externalEgress }}
+    - to:
+        - ipBlock:
+            cidr: {{ .cidr | quote }}
+      ports:
+        {{- range .ports }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+    {{- end }}
+{{- end }}
