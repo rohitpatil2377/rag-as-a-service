@@ -113,6 +113,7 @@ services:
     # cpu-1.5 has a known artifact-download bug ("relative URL without a base") against
     # the current HF repo layout for this model; cpu-latest is confirmed working (verified
     # 2026-07-02). Re-pin to a specific verified tag when Acme cuts an internal mirror image.
+    restart: unless-stopped
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
     command: ["--model-id", "BAAI/bge-small-en-v1.5"]
     # TODO(Phase-1 sovereignty): set HF_ENDPOINT to an internal model mirror and
@@ -130,6 +131,7 @@ services:
     # ONLY — for Hindi/Indic use the GPU tier below.
     # --max-client-batch-size must cover RAG_RERANK_CANDIDATES or TEI 422s the request; the
     # client also batches, so this is belt-and-braces.
+    restart: unless-stopped
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
     command: ["--model-id", "cross-encoder/ms-marco-MiniLM-L-6-v2", "--max-client-batch-size", "64"]
     ports: ["${RAG_INFRA_BIND:-0.0.0.0}:8083:80"]
@@ -328,6 +330,7 @@ services:
     mem_limit: 512m
 
   api:                                      # RAG as a Service modular monolith
+    restart: unless-stopped
     build:
       context: ../..
       dockerfile: apps/api/Dockerfile
@@ -538,6 +541,7 @@ services:
     # `api`), so the whole platform is browsable at http://<host>/ after `make up` — no
     # separate dev server, no CORS. DEV convenience; prod serves the SPA behind the
     # ingress (infra/helm), not this container.
+    restart: unless-stopped
     build:
       context: ../..
       dockerfile: apps/console/Dockerfile
